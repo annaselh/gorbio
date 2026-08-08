@@ -20,11 +20,7 @@ type Migratable interface {
 }
 
 type Routable interface {
-	RegisterRoutes(router Router)
-}
-
-type ModelProvider interface {
-	RegisterModels(reg *ModelRegistry)
+	RegisterRoutes(r Router)
 }
 
 type EventSubscriber interface {
@@ -36,7 +32,19 @@ type MenuProvider interface {
 }
 
 type Lifecycle interface {
-	OnInstall(ctx context.Context, tx DBTx) error
-	OnUninstall(ctx context.Context, tx DBTx) error
-	OUpgrade(ctx context.Context, tx DBTx, fromVersion string) error
+	OnInstall(ctx context.Context) error
+	OnUninstall(ctx context.Context) error
+	OnUpgrade(ctx context.Context, fromVersion string) error
 }
+
+type Migration struct {
+	ID   string
+	Up   func() error
+	Down func() error
+}
+
+type Router interface {
+	Handle(method, path string, handler HandlerFunc)
+}
+
+type HandlerFunc func(ctx *Context) error
