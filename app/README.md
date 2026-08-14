@@ -231,6 +231,35 @@ cd app
 go test ./...
 ```
 
+Those run against a nil database handle, so they cover the validation that
+happens before a query and nothing below it.
+
+The integration tests under `internal/integration` cover what only a database
+decides: the row locks, the sequence allocation and the unique index behind it,
+the SQL the dashboard is built from, the last-owner guard, and the migrations.
+They boot the application through the module registry exactly as `cmd/server`
+does, so they exercise the real wiring rather than a hand-assembled imitation of
+it — a test that constructed the services itself would not notice if module
+registration stopped connecting them.
+
+They **skip** unless `GORBIO_TEST_DATABASE_URL` is set, so the command above
+stays usable without a database:
+
+```bash
+docker run --rm -d --name gorbio-test-db -p 5432:5432 \
+  -e POSTGRES_USER=gorbio -e POSTGRES_PASSWORD=gorbio -e POSTGRES_DB=gorbio_test \
+  postgres:17
+
+cd app
+GORBIO_TEST_DATABASE_URL='postgres://gorbio:gorbio@localhost:5432/gorbio_test?sslmode=disable' \
+  go test ./...
+```
+
+Point it at a scratch database, never a real one: the suite migrates the schema
+on connect. It does not truncate between tests — each test works inside its own
+freshly created tenant, which is why they can run in parallel, and why a test
+that leaks across the tenant boundary fails instead of passing quietly.
+
 ## Notes
 
 This repository is still in a foundational stage. The current code establishes the application skeleton and modular runtime architecture, while the business-specific ERP modules and integrations are meant to be added on top of this base.
