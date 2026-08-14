@@ -62,6 +62,39 @@ type verifyEmailRequest struct {
 	Token string `json:"token" binding:"required"`
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required"`
+}
+
+func (s *AuthService) changePasswordHandler(c *gin.Context) {
+	principal, ok := PrincipalFromContext(c)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	var request changePasswordRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "current and new password are required"})
+		return
+	}
+
+	switch err := s.ChangePassword(c.Request.Context(), principal, request.CurrentPassword, request.NewPassword); {
+	case err == nil:
+		c.Status(http.StatusNoContent)
+	case errors.Is(err, ErrInvalidCredentials):
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "current password is incorrect"})
+	case errors.Is(err, ErrSamePassword):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+	case errors.Is(err, ErrWeakPassword):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+	default:
+		slog.Error("password change failed", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not change password"})
+	}
+}
+
 // forgotPasswordHandler always answers 202, whether or not the address exists.
 // Distinguishing the two would turn this endpoint into an account oracle.
 func (s *AuthService) forgotPasswordHandler(c *gin.Context) {

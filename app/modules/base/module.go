@@ -35,6 +35,7 @@ func (m *Module) Register(app *core.App) error {
 	// neutrally so they cannot be used to enumerate accounts.
 	app.Router.POST("/api/auth/password/forgot", auth.forgotPasswordHandler)
 	app.Router.POST("/api/auth/password/reset", auth.resetPasswordHandler)
+	app.Router.POST("/api/auth/password/change", auth.RequireAuth(), auth.changePasswordHandler)
 	app.Router.POST("/api/auth/email/verify", auth.verifyEmailHandler)
 	app.Router.POST("/api/auth/email/resend", auth.RequireAuth(), auth.resendVerificationHandler)
 	return nil

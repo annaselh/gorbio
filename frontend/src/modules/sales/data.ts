@@ -1,14 +1,43 @@
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { api } from "@/core/apiClient";
 import type { StatusTone } from "@/shared/ui/Badge";
 
+/** Mirrors OrderStatus in app/modules/sales/models.go. */
 export type OrderStatus = "Confirmed" | "Draft" | "Cancelled";
 
+/** Mirrors OrderLine in app/modules/sales/models.go. */
+export interface SalesOrderLine {
+  id: string;
+  sku: string;
+  description: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+}
+
+/**
+ * Mirrors Order in app/modules/sales/models.go.
+ *
+ * Money arrives as an integer in minor units, matching how the backend stores
+ * it, so no rounding happens in transit.
+ */
 export interface SalesOrder {
   id: string;
   number: string;
-  customer: string;
-  date: string;
-  total: number;
+  customer_name: string;
   status: OrderStatus;
+  order_date: string;
+  currency: string;
+  subtotal: number;
+  discount_total: number;
+  total: number;
+  notes?: string;
+  lines?: SalesOrderLine[];
+}
+
+interface ListResponse {
+  data: SalesOrder[];
+  total: number;
 }
 
 export const ORDER_STATUS_TONE: Record<OrderStatus, StatusTone> = {
@@ -17,37 +46,42 @@ export const ORDER_STATUS_TONE: Record<OrderStatus, StatusTone> = {
   Cancelled: "critical",
 };
 
-const CUSTOMERS = [
-  "PT. Maju Bersama",
-  "CV. Sejahtera Abadi",
-  "PT. Sukses Makmur",
-  "PT. Cahaya Sentosa",
-  "UD. Berkah Abadi",
-  "PT. Nusantara Jaya",
-  "CV. Mitra Sejati",
-  "PT. Bumi Persada",
-];
+export const salesKeys = {
+  orders: (params: { limit: number; offset: number; status?: OrderStatus }) =>
+    ["sales", "orders", params] as const,
+  order: (id: string) => ["sales", "order", id] as const,
+};
 
-const STATUSES: OrderStatus[] = [
-  "Confirmed",
-  "Confirmed",
-  "Draft",
-  "Confirmed",
-  "Cancelled",
-];
+/**
+ * Server-side pagination: the backend returns one page plus the unpaginated
+ * count, so the table never downloads the whole ledger to render five rows.
+ * keepPreviousData holds the current page on screen while the next one loads,
+ * which stops the table collapsing to its empty state on every page change.
+ */
+export function useSalesOrders(params: {
+  limit: number;
+  offset: number;
+  status?: OrderStatus;
+}) {
+  return useQuery({
+    queryKey: salesKeys.orders(params),
+    queryFn: () => {
+      const query = new URLSearchParams({
+        limit: String(params.limit),
+        offset: String(params.offset),
+      });
+      if (params.status) query.set("status", params.status);
+      return api.get<ListResponse>(`/sales/orders?${query}`);
+    },
+    placeholderData: keepPreviousData,
+  });
+}
 
-const TOTALS = [25_000_000, 18_500_000, 12_750_000, 9_800_000, 6_500_000];
-
-/** 125 rows so the mockup's "1–5 of 125 · … · 25" pagination is real. */
-export const salesOrders: SalesOrder[] = Array.from({ length: 125 }, (_, i) => {
-  const n = 123 - i;
-  const d = new Date(Date.UTC(2024, 4, 31 - Math.floor(i / 2)));
-  return {
-    id: `so-${n}`,
-    number: `SO-${String(Math.abs(n)).padStart(6, "0")}`,
-    customer: CUSTOMERS[i % CUSTOMERS.length],
-    date: d.toISOString(),
-    total: TOTALS[i % TOTALS.length],
-    status: STATUSES[i % STATUSES.length],
-  };
-});
+export function useSalesOrder(id: string) {
+  return useQuery({
+    queryKey: salesKeys.order(id),
+    queryFn: () => api.get<{ data: SalesOrder }>(`/sales/orders/${id}`),
+    select: (response) => response.data,
+    enabled: Boolean(id),
+  });
+}

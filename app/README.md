@@ -103,11 +103,30 @@ someone who cannot sign in.
 | GET | `/api/auth/me` | auth | Profile, tenant and permission codes |
 | POST | `/api/auth/password/forgot` | – | Mail a reset link; always answers 202 |
 | POST | `/api/auth/password/reset` | – | Consume a reset token, set a new password |
+| POST | `/api/auth/password/change` | auth | Change password by proving the current one |
 | POST | `/api/auth/email/verify` | – | Consume a verification token |
 | POST | `/api/auth/email/resend` | auth | Re-send the verification email |
 
 Business modules register their own routes behind `RequireAuth` and an explicit
-permission; see `modules/inventory/routes.go` for the pattern.
+permission; see `modules/sales/routes.go` for the pattern.
+
+| Method | Path | Permission | Purpose |
+| --- | --- | --- | --- |
+| GET | `/api/sales/orders` | `sales.read` | Paged list with `limit`, `offset`, `status`, `customer` |
+| GET | `/api/sales/orders/:id` | `sales.read` | One order with its lines |
+| POST | `/api/sales/orders` | `sales.manage` | Create a draft order |
+| PUT | `/api/sales/orders/:id/status` | `sales.manage` | Confirm or cancel |
+| POST | `/api/sales/orders/:id/discount` | `sales.manage` | Applied by the sales-discount extension |
+| GET | `/api/inventory/items` | `inventory.read` | Stock list; `low_stock=true` filters to alerts |
+| GET | `/api/inventory/items/:id` | `inventory.read` | One stock item |
+| POST | `/api/inventory/items` | `inventory.manage` | Create a stock item |
+| POST | `/api/inventory/items/:id/adjust` | `inventory.manage` | Signed quantity delta |
+
+Sales money is stored in minor currency units as `int64`. Binary floating point
+cannot represent `0.1` exactly, so summing float lines drifts; an order total a
+customer disputes is worse than one that is inconvenient to write. `Order.
+Recalculate` is the single place that decides what an order costs, which is why
+the discount extension goes through the module's service rather than its tables.
 
 Recovery tokens are stored as SHA-256 hashes, are single-use, expire (1 hour for
 reset, 24 hours for verification), and requesting a new one supersedes any

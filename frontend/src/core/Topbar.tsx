@@ -3,6 +3,7 @@ import {
   Bell,
   ChevronDown,
   CircleHelp,
+  KeyRound,
   LogOut,
   Menu,
   MessageSquare,
@@ -11,6 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/shared/cn";
 import { useAuth } from "./auth";
+import { ChangePasswordDialog } from "./ChangePasswordDialog";
 
 const iconButton =
   "grid size-9 cursor-pointer place-items-center rounded-lg text-ink-secondary transition-colors hover:bg-hairline-soft hover:text-ink";
@@ -110,6 +112,7 @@ function initialsOf(name: string, email: string) {
 function UserMenu() {
   const { session, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -175,14 +178,30 @@ function UserMenu() {
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              void logout();
+              setChangingPassword(true);
             }}
             className="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-ink transition-colors hover:bg-hairline-soft"
+          >
+            <KeyRound className="size-4 text-ink-secondary" />
+            Change password
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              void logout();
+            }}
+            className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-ink transition-colors hover:bg-hairline-soft"
           >
             <LogOut className="size-4 text-ink-secondary" />
             Sign out
           </button>
         </div>
+      )}
+
+      {changingPassword && (
+        <ChangePasswordDialog onClose={() => setChangingPassword(false)} />
       )}
     </div>
   );

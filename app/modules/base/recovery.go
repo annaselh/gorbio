@@ -24,7 +24,56 @@ const (
 var (
 	ErrInvalidToken = errors.New("invalid or expired token")
 	ErrWeakPassword = errors.New("password does not meet requirements")
+	ErrSamePassword = errors.New("new password must differ from the current one")
 )
+
+// ChangePassword replaces the password of a signed-in user after proving they
+// know the current one. This is the authenticated counterpart to the reset
+// flow: no token is involved, and the caller stays signed in.
+func (s *AuthService) ChangePassword(ctx context.Context, principal Principal, currentPassword, newPassword string) error {
+	var user User
+	if err := s.db.WithContext(ctx).Where("id = ?", principal.UserID).First(&user).Error; err != nil {
+		return fmt.Errorf("load user: %w", err)
+	}
+
+	if !verifyPassword(user.PasswordHash, currentPassword) {
+		return ErrInvalidCredentials
+	}
+	// Reject a no-op change: it would revoke the user's other sessions and
+	// write an audit entry while leaving the credential exactly as it was.
+	if verifyPassword(user.PasswordHash, newPassword) {
+		return ErrSamePassword
+	}
+
+	passwordHash, err := hashPassword(newPassword)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrWeakPassword, err)
+	}
+
+	now := time.Now().UTC()
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&User{}).Where("id = ?", user.ID).Updates(map[string]any{
+			"password_hash":         passwordHash,
+			"password_changed_at":   now,
+			"failed_login_attempts": 0,
+			"locked_until":          nil,
+		}).Error; err != nil {
+			return fmt.Errorf("update password: %w", err)
+		}
+
+		// Sign out everywhere else but keep the caller's own session: they just
+		// authenticated, and logging them out of the tab they are using is
+		// hostile. Any other device holding the old credential is cut off.
+		if err := tx.Model(&Session{}).
+			Where("user_id = ? AND id <> ? AND revoked_at IS NULL", user.ID, principal.SessionID).
+			Update("revoked_at", now).Error; err != nil {
+			return fmt.Errorf("revoke other sessions: %w", err)
+		}
+
+		s.recordAuditTx(ctx, tx, &user.ID, &principal.TenantID, "auth.password_changed", "user", user.ID.String())
+		return nil
+	})
+}
 
 // RequestPasswordReset issues a reset token and mails it.
 //

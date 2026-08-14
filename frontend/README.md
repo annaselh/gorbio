@@ -108,9 +108,11 @@ has two or more series, and a screen-reader `<SrTable>` data view.
   user and company with a sign-out action. The session is an HttpOnly cookie set
   by the backend, so `apiClient` sends `credentials: "include"` and never
   handles a token itself.
-- **Module data is still fixture-backed except inventory**, which reads
-  `/api/inventory/items` through React Query. Sales and the dashboard widgets
-  remain static until their backend endpoints return real rows.
+- **Sales and inventory read live data**; the `base` dashboard widgets (KPIs,
+  cash flow, sales overview, top products, recent activities) are still
+  fixture-backed until their backend endpoints exist. `SalesOrdersTable`
+  paginates server-side and keeps the previous page on screen while the next
+  one loads.
 - Five `oxlint` fast-refresh warnings: three from manifest files exporting a
   const beside lazy component refs, two from `auth.tsx` and `AuthLayout.tsx`
   exporting a hook and a shared class string beside their components. Both are

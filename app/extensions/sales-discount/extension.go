@@ -3,6 +3,7 @@ package salesdiscount
 import (
 	"github.com/annaselh/gorbio/core"
 	"github.com/annaselh/gorbio/modules/base"
+	"github.com/annaselh/gorbio/modules/sales"
 )
 
 type Extension struct{}
@@ -29,13 +30,21 @@ func (e *Extension) Register(app *core.App) error {
 		return err
 	}
 
+	// Reach the host module through its published service rather than touching
+	// its tables directly, so the discount goes through the same validation and
+	// recalculation the module applies to its own writes.
+	orders, err := sales.ServiceFromApp(app)
+	if err != nil {
+		return err
+	}
+
 	// An extension mutates its host module's data, so it must be guarded at
 	// least as strictly as the module's own write routes.
 	app.Router.POST(
 		"/api/sales/orders/:id/discount",
 		auth.RequireAuth(),
-		base.RequirePermission("sales.manage"),
-		applyDiscount,
+		base.RequirePermission(sales.PermissionManage),
+		(&handlers{orders: orders}).applyDiscount,
 	)
 	return nil
 }
