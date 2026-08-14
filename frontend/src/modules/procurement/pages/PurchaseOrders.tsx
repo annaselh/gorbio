@@ -167,7 +167,8 @@ export default function PurchaseOrders() {
 /**
  * Offers only the transitions the service accepts: Draft -> Confirmed ->
  * Received, with cancellation allowed until receipt. A received order is
- * terminal because stock has already moved.
+ * terminal because receiving raises inventory quantities for every line, and
+ * nothing here can take those units back off the shelf.
  */
 function StatusActions({
   order,

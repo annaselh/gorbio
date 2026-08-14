@@ -49,3 +49,8 @@ func (m *Module) Boot(app *core.App) error {
 	slog.Info("module booted", "module", m.Name())
 	return nil
 }
+
+// ServiceFromApp resolves the inventory service from the container.
+func ServiceFromApp(app *core.App) (*Service, error) {
+	return core.ServiceAs[*Service](app, ServiceName)
+}

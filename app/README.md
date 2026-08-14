@@ -158,6 +158,17 @@ diverge. The dependency points one way on purpose: **CRM depends on sales and
 hands it a customer lookup at registration; sales knows nothing about CRM** and
 still works with the module uninstalled.
 
+Marking a purchase order **Received** raises inventory quantities for every line
+on it, inside the same transaction that flips the status - an order claiming the
+goods arrived while stock disagrees is worse than neither write landing. A line
+whose SKU has no stock item yet opens one at the received quantity: purchase
+lines carry free-text SKUs with no foreign key into inventory, so refusing would
+make an ordinary receipt impossible to record without hand-creating the item
+first. Only *arriving* at Received moves stock, so re-sending the status on an
+already-received order does not book the delivery twice. The wiring follows the
+CRM pattern: **procurement declares the hook and inventory never hears of
+procurement**, with the adapter supplied at module registration.
+
 The dashboard module depends on base, sales, inventory, procurement and CRM
 rather than the reverse - putting these queries in base would invert the dependency
 every other module relies on. Only *Confirmed* sales count as revenue and only

@@ -26,10 +26,31 @@ var (
 
 type Service struct {
 	db *gorm.DB
+	// receiveStock is nil when no module tracks stock; receiving an order then
+	// moves it to Received and nothing else.
+	receiveStock StockReceiver
 }
 
 func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
+}
+
+// StockReceiver hands the lines of a newly received order to whatever module
+// tracks stock. The purchase logic declares the type and never implements it,
+// so it carries no inventory types and can be tested without a stock module at
+// all; module.go supplies the adapter - the same seam sales uses to accept a
+// CRM customer without the order logic knowing what a CRM record is.
+//
+// It is called inside the transaction that flips the order to Received, and is
+// given that transaction: an order that says the goods arrived while stock says
+// they did not is worse than neither write landing.
+type StockReceiver func(ctx context.Context, tx *gorm.DB, tenantID uuid.UUID, lines []PurchaseOrderLine) error
+
+// WithStockReceiver attaches the stock hook. Called during wiring, before any
+// request is served.
+func (s *Service) WithStockReceiver(receiver StockReceiver) *Service {
+	s.receiveStock = receiver
+	return s
 }
 
 // ---------------------------------------------------------------- vendors
@@ -389,12 +410,15 @@ func (s *Service) UpdatePurchaseStatus(ctx context.Context, tenantID, id uuid.UU
 			return fmt.Errorf("load purchase order: %w", err)
 		}
 
-		if err := validatePurchaseTransition(order.Status, status); err != nil {
+		previous := order.Status
+		if err := validatePurchaseTransition(previous, status); err != nil {
 			return err
 		}
 
+		arriving := arrivesAtReceived(previous, status)
+
 		updates := map[string]any{"status": status}
-		if status == PurchaseStatusReceived {
+		if arriving {
 			now := time.Now().UTC()
 			updates["received_at"] = now
 			order.ReceivedAt = &now
@@ -403,12 +427,32 @@ func (s *Service) UpdatePurchaseStatus(ctx context.Context, tenantID, id uuid.UU
 			return fmt.Errorf("update purchase status: %w", err)
 		}
 		order.Status = status
+
+		if arriving && s.receiveStock != nil {
+			var lines []PurchaseOrderLine
+			if err := tx.Where("tenant_id = ? AND purchase_order_id = ?", tenantID, id).
+				Order("created_at ASC").Find(&lines).Error; err != nil {
+				return fmt.Errorf("load purchase order lines: %w", err)
+			}
+			if err := s.receiveStock(ctx, tx, tenantID, lines); err != nil {
+				return fmt.Errorf("receive stock: %w", err)
+			}
+			order.Lines = lines
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &order, nil
+}
+
+// arrivesAtReceived reports whether this transition is the delivery landing.
+// Arriving at Received is what moves stock, not sitting at Received: re-sending
+// the same status is a permitted no-op transition, and counting it as an
+// arrival would book the same delivery into inventory twice.
+func arrivesAtReceived(from, to PurchaseStatus) bool {
+	return to == PurchaseStatusReceived && from != PurchaseStatusReceived
 }
 
 func validatePurchaseTransition(from, to PurchaseStatus) error {
@@ -430,21 +474,6 @@ func validatePurchaseTransition(from, to PurchaseStatus) error {
 		return fmt.Errorf("%w: a cancelled order is final", ErrNotEditable)
 	}
 	return fmt.Errorf("%w: cannot move a %s order to %s", ErrNotEditable, from, to)
-}
-
-// ReceivedLines returns the SKUs and quantities of a received order, which the
-// caller can hand to the inventory module to increment stock. Procurement does
-// not reach into inventory itself: the modules stay independent, and whoever
-// wires them decides the policy.
-func (s *Service) ReceivedLines(ctx context.Context, tenantID, id uuid.UUID) ([]PurchaseOrderLine, error) {
-	order, err := s.GetPurchaseOrder(ctx, tenantID, id)
-	if err != nil {
-		return nil, err
-	}
-	if order.Status != PurchaseStatusReceived {
-		return nil, fmt.Errorf("%w: order is %s, not Received", ErrInvalidInput, order.Status)
-	}
-	return order.Lines, nil
 }
 
 // ------------------------------------------------------------------ helpers

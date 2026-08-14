@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const ServiceName = "inventory.stock"
@@ -126,7 +127,7 @@ func (s *Service) Adjust(ctx context.Context, tenantID, id uuid.UUID, delta int)
 
 	var item StockItem
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("tenant_id = ? AND id = ?", tenantID, id).First(&item).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrNotFound
@@ -149,6 +150,113 @@ func (s *Service) Adjust(ctx context.Context, tenantID, id uuid.UUID, delta int)
 		return nil, err
 	}
 	return &item, nil
+}
+
+// Receipt is one incoming line of goods. Description and Unit are consulted
+// only when the SKU has no stock item yet and one has to be created.
+type Receipt struct {
+	SKU         string
+	Description string
+	Unit        string
+	Quantity    int
+}
+
+// ReceiveTx adds incoming quantities to stock inside the caller's transaction.
+//
+// It takes the transaction rather than opening its own so the stock movement
+// commits with the business event that caused it. A purchase order marked
+// Received and the stock it brought in must not be able to disagree: if either
+// write fails, neither should survive.
+//
+// A SKU with no stock item yet is created at the received quantity. Purchase
+// order lines carry free-text SKUs with no foreign key into inventory, so
+// refusing would make a perfectly ordinary receipt impossible to record without
+// hand-creating the item first.
+func (s *Service) ReceiveTx(ctx context.Context, tx *gorm.DB, tenantID uuid.UUID, receipts []Receipt) error {
+	if tenantID == uuid.Nil {
+		return errMissingTenant
+	}
+	if tx == nil {
+		return fmt.Errorf("%w: a transaction is required", ErrInvalidInput)
+	}
+
+	// Two lines of the same order may name the same SKU. Summing them first
+	// means one locked row per SKU instead of one per line.
+	totals, order, err := totalBySKU(receipts)
+	if err != nil {
+		return err
+	}
+
+	for _, sku := range order {
+		incoming := totals[sku]
+
+		var item StockItem
+		err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("tenant_id = ? AND sku = ?", tenantID, sku).First(&item).Error
+		switch {
+		case err == nil:
+			if err := tx.WithContext(ctx).Model(&item).
+				Update("quantity", item.Quantity+incoming.Quantity).Error; err != nil {
+				return fmt.Errorf("receive stock for %s: %w", sku, err)
+			}
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			created := StockItem{
+				ID: uuid.New(), TenantID: tenantID, SKU: sku,
+				Name:     incoming.Name,
+				Unit:     incoming.Unit,
+				Quantity: incoming.Quantity,
+			}
+			if err := tx.WithContext(ctx).Create(&created).Error; err != nil {
+				return fmt.Errorf("create stock item %s on receipt: %w", sku, err)
+			}
+		default:
+			return fmt.Errorf("load stock item %s: %w", sku, err)
+		}
+	}
+	return nil
+}
+
+// incoming is the summed arrival for one SKU, carrying the fields needed to
+// open a stock item if none exists.
+type incoming struct {
+	Quantity int
+	Name     string
+	Unit     string
+}
+
+// totalBySKU validates and sums receipts, returning the SKUs in first-seen
+// order so the rows are always locked in a deterministic sequence - two
+// concurrent receipts touching the same pair of SKUs cannot deadlock by
+// approaching them from opposite ends.
+func totalBySKU(receipts []Receipt) (map[string]incoming, []string, error) {
+	totals := make(map[string]incoming, len(receipts))
+	order := make([]string, 0, len(receipts))
+
+	for _, receipt := range receipts {
+		sku := strings.ToUpper(strings.TrimSpace(receipt.SKU))
+		if sku == "" {
+			return nil, nil, fmt.Errorf("%w: a received line has no sku", ErrInvalidInput)
+		}
+		if receipt.Quantity <= 0 {
+			return nil, nil, fmt.Errorf("%w: received quantity for %s must be positive", ErrInvalidInput, sku)
+		}
+
+		existing, seen := totals[sku]
+		if !seen {
+			order = append(order, sku)
+			existing.Name = strings.TrimSpace(receipt.Description)
+			if existing.Name == "" {
+				existing.Name = sku
+			}
+			existing.Unit = strings.TrimSpace(receipt.Unit)
+			if existing.Unit == "" {
+				existing.Unit = "pcs"
+			}
+		}
+		existing.Quantity += receipt.Quantity
+		totals[sku] = existing
+	}
+	return totals, order, nil
 }
 
 func isUniqueViolation(err error) bool {
