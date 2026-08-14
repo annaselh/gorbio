@@ -1,15 +1,24 @@
 import { useState } from "react";
+import { Plus } from "lucide-react";
 import { PageHeader } from "@/core/Shell";
+import { useAuth } from "@/core/auth";
 import { Card, CardHeader } from "@/shared/ui/Card";
 import { Badge } from "@/shared/ui/Badge";
+import { Button } from "@/shared/ui/Button";
 import { Pagination } from "@/shared/ui/Pagination";
-import { VENDOR_STATUS_TONE, useVendors } from "../data";
+import { VENDOR_STATUS_TONE, useSetVendorStatus, useVendors, type Vendor } from "../data";
+import { VendorDialog } from "../components/VendorDialog";
 
 const PAGE_SIZE = 10;
 
 export default function Vendors() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<Vendor | null>(null);
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission("procurement.manage");
+  const setStatus = useSetVendorStatus();
 
   const { data, isPending, isError, isPlaceholderData } = useVendors({
     limit: PAGE_SIZE,
@@ -35,17 +44,29 @@ export default function Vendors() {
         <CardHeader
           title="All Vendors"
           action={
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-              placeholder="Search name or code"
-              aria-label="Search vendors"
-              className="rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-            />
+            <span className="flex items-center gap-2">
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search name or code"
+                aria-label="Search vendors"
+                className="rounded-lg border border-hairline bg-surface px-3 py-1.5 text-xs text-ink placeholder:text-ink-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+              />
+              {canManage && (
+                <Button
+                  variant="primary"
+                  className="px-3 py-1.5 text-xs"
+                  onClick={() => setCreating(true)}
+                >
+                  <Plus aria-hidden className="size-3.5" />
+                  New vendor
+                </Button>
+              )}
+            </span>
           }
         />
 
@@ -70,6 +91,7 @@ export default function Vendors() {
                     <th scope="col" className={th}>Email</th>
                     <th scope="col" className={th}>Terms</th>
                     <th scope="col" className={th}>Status</th>
+                    {canManage && <th scope="col" className={th}>Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-hairline-soft">
@@ -98,6 +120,35 @@ export default function Vendors() {
                           {vendor.status}
                         </Badge>
                       </td>
+                      {canManage && (
+                        <td className="px-2.5 py-3">
+                          <span className="flex gap-1.5">
+                            <Button
+                              variant="outline"
+                              className="px-2.5 py-1 text-xs"
+                              onClick={() => setEditing(vendor)}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              className="px-2.5 py-1 text-xs"
+                              disabled={setStatus.isPending}
+                              onClick={() =>
+                                setStatus.mutate({
+                                  id: vendor.id,
+                                  status:
+                                    vendor.status === "Active"
+                                      ? "Inactive"
+                                      : "Active",
+                                })
+                              }
+                            >
+                              {vendor.status === "Active" ? "Deactivate" : "Activate"}
+                            </Button>
+                          </span>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -116,6 +167,11 @@ export default function Vendors() {
           </>
         )}
       </Card>
+
+      {creating && <VendorDialog onClose={() => setCreating(false)} />}
+      {editing && (
+        <VendorDialog vendor={editing} onClose={() => setEditing(null)} />
+      )}
     </>
   );
 }

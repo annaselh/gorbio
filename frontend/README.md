@@ -116,7 +116,12 @@ has two or more series, and a screen-reader `<SrTable>` data view.
 - **The KPI row shows four cards, three with sparklines.** Customers is a
   distinct count per day, which does not accumulate into a meaningful line, so
   that card renders without one rather than borrowing another card's shape.
-- Five `oxlint` fast-refresh warnings: three from manifest files exporting a
-  const beside lazy component refs, two from `auth.tsx` and `AuthLayout.tsx`
-  exporting a hook and a shared class string beside their components. Both are
-  inherent to the pattern and affect HMR granularity only.
+- Thirteen `oxlint` warnings, all the same `only-export-components` rule:
+  manifest files export a const beside lazy component refs, and a few modules
+  export a hook or a shared class string beside their components. Inherent to
+  both patterns; affects HMR granularity only.
+- **Money in forms is whole rupiah** — the same integer the API stores. IDR has
+  no subdivision in practice, so there is deliberately no hundredths conversion
+  anywhere; adding one would inflate every total by 100.
+- **Status buttons offer only the transitions the server accepts.** Rendering a
+  button the API would reject teaches users to ignore errors.

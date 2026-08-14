@@ -1,6 +1,4 @@
-import { Plus } from "lucide-react";
 import { PageHeader } from "@/core/Shell";
-import { Button } from "@/shared/ui/Button";
 import { SalesOrdersTable } from "../components/SalesOrdersTable";
 
 export default function SalesOrders() {
@@ -9,14 +7,10 @@ export default function SalesOrders() {
       <PageHeader
         title="Sales Orders"
         subtitle="All quotations and confirmed orders across your companies."
-        actions={
-          <Button variant="primary">
-            <Plus aria-hidden className="size-4" />
-            New Order
-          </Button>
-        }
       />
-      <SalesOrdersTable title="All Orders" pageSize={12} />
+      {/* The create button lives in the card header beside the table it
+          affects, rather than in the page header away from it. */}
+      <SalesOrdersTable title="All Orders" pageSize={12} showActions />
     </>
   );
 }

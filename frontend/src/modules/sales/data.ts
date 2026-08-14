@@ -1,6 +1,12 @@
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
 import { api } from "@/core/apiClient";
 import type { StatusTone } from "@/shared/ui/Badge";
+import type { DraftLine } from "@/shared/ui/LineItemsEditor";
 
 /** Mirrors OrderStatus in app/modules/sales/models.go. */
 export type OrderStatus = "Confirmed" | "Draft" | "Cancelled";
@@ -83,5 +89,47 @@ export function useSalesOrder(id: string) {
     queryFn: () => api.get<{ data: SalesOrder }>(`/sales/orders/${id}`),
     select: (response) => response.data,
     enabled: Boolean(id),
+  });
+}
+
+/** Invalidating the whole "sales" tree also refreshes the dashboard figures
+ *  that derive from these orders. */
+function invalidateSales(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: ["sales"] });
+  queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+}
+
+export interface CreateSalesOrderInput {
+  customer_name: string;
+  order_date?: string;
+  notes?: string;
+  lines: DraftLine[];
+}
+
+export function useCreateSalesOrder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateSalesOrderInput) =>
+      api.post<{ data: SalesOrder }>("/sales/orders", {
+        customer_name: input.customer_name,
+        order_date: input.order_date,
+        notes: input.notes,
+        lines: input.lines.map((line) => ({
+          sku: line.sku,
+          description: line.description,
+          quantity: line.quantity,
+          unit_price: line.unitPrice,
+        })),
+      }),
+    onSuccess: () => invalidateSales(queryClient),
+  });
+}
+
+export function useUpdateSalesOrderStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: OrderStatus }) =>
+      api.put<{ data: SalesOrder }>(`/sales/orders/${id}/status`, { status }),
+    onSuccess: () => invalidateSales(queryClient),
   });
 }

@@ -1,6 +1,12 @@
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  keepPreviousData,
+} from "@tanstack/react-query";
 import { api } from "@/core/apiClient";
 import type { StatusTone } from "@/shared/ui/Badge";
+import type { DraftLine } from "@/shared/ui/LineItemsEditor";
 
 /** Mirrors VendorStatus in app/modules/procurement/models.go. */
 export type VendorStatus = "Active" | "Inactive";
@@ -107,5 +113,90 @@ export function usePurchaseOrders(params: {
       return api.get<ListResponse<PurchaseOrder>>(`/procurement/orders?${query}`);
     },
     placeholderData: keepPreviousData,
+  });
+}
+
+/** Invalidating the whole tree also refreshes the dashboard spend figures. */
+function invalidateProcurement(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  queryClient.invalidateQueries({ queryKey: ["procurement"] });
+  queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+}
+
+export interface VendorInput {
+  code?: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  tax_id?: string;
+  payment_term_days?: number;
+  notes?: string;
+}
+
+export function useCreateVendor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: VendorInput) =>
+      api.post<{ data: Vendor }>("/procurement/vendors", input),
+    onSuccess: () => invalidateProcurement(queryClient),
+  });
+}
+
+export function useUpdateVendor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: VendorInput }) =>
+      api.put<{ data: Vendor }>(`/procurement/vendors/${id}`, input),
+    onSuccess: () => invalidateProcurement(queryClient),
+  });
+}
+
+export function useSetVendorStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: VendorStatus }) =>
+      api.put<{ data: Vendor }>(`/procurement/vendors/${id}/status`, { status }),
+    onSuccess: () => invalidateProcurement(queryClient),
+  });
+}
+
+export interface CreatePurchaseOrderInput {
+  vendor_id: string;
+  order_date?: string;
+  expected_date?: string;
+  notes?: string;
+  lines: DraftLine[];
+}
+
+export function useCreatePurchaseOrder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreatePurchaseOrderInput) =>
+      api.post<{ data: PurchaseOrder }>("/procurement/orders", {
+        vendor_id: input.vendor_id,
+        order_date: input.order_date,
+        expected_date: input.expected_date,
+        notes: input.notes,
+        lines: input.lines.map((line) => ({
+          sku: line.sku,
+          description: line.description,
+          quantity: line.quantity,
+          unit_price: line.unitPrice,
+        })),
+      }),
+    onSuccess: () => invalidateProcurement(queryClient),
+  });
+}
+
+export function useUpdatePurchaseStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: PurchaseStatus }) =>
+      api.put<{ data: PurchaseOrder }>(`/procurement/orders/${id}/status`, {
+        status,
+      }),
+    onSuccess: () => invalidateProcurement(queryClient),
   });
 }

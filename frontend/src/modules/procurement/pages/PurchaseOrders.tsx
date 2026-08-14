@@ -1,15 +1,28 @@
 import { useState } from "react";
+import { Plus } from "lucide-react";
 import { PageHeader } from "@/core/Shell";
+import { useAuth } from "@/core/auth";
 import { Card, CardHeader } from "@/shared/ui/Card";
 import { Badge, Dot } from "@/shared/ui/Badge";
+import { Button } from "@/shared/ui/Button";
 import { Pagination } from "@/shared/ui/Pagination";
 import { formatDate, formatIDR } from "@/shared/format";
-import { PURCHASE_STATUS_TONE, usePurchaseOrders } from "../data";
+import {
+  PURCHASE_STATUS_TONE,
+  usePurchaseOrders,
+  useUpdatePurchaseStatus,
+  type PurchaseOrder,
+} from "../data";
+import { NewPurchaseOrderDialog } from "../components/NewPurchaseOrderDialog";
 
 const PAGE_SIZE = 10;
 
 export default function PurchaseOrders() {
   const [page, setPage] = useState(1);
+  const [creating, setCreating] = useState(false);
+  const { hasPermission } = useAuth();
+  const canManage = hasPermission("procurement.manage");
+  const updateStatus = useUpdatePurchaseStatus();
 
   const { data, isPending, isError, isPlaceholderData } = usePurchaseOrders({
     limit: PAGE_SIZE,
@@ -31,7 +44,21 @@ export default function PurchaseOrders() {
       />
 
       <Card className="flex flex-col">
-        <CardHeader title="All Purchase Orders" />
+        <CardHeader
+          title="All Purchase Orders"
+          action={
+            canManage ? (
+              <Button
+                variant="primary"
+                className="px-3 py-1.5 text-xs"
+                onClick={() => setCreating(true)}
+              >
+                <Plus aria-hidden className="size-3.5" />
+                New order
+              </Button>
+            ) : undefined
+          }
+        />
 
         {isPending ? (
           <Message>Loading purchase orders…</Message>
@@ -55,6 +82,7 @@ export default function PurchaseOrders() {
                     <th scope="col" className={th}>Expected</th>
                     <th scope="col" className={th}>Total</th>
                     <th scope="col" className={th}>Status</th>
+                    {canManage && <th scope="col" className={th}>Actions</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-hairline-soft">
@@ -89,6 +117,17 @@ export default function PurchaseOrders() {
                         <td className="px-2.5 py-3">
                           <Badge tone={tone}>{order.status}</Badge>
                         </td>
+                        {canManage && (
+                          <td className="px-2.5 py-3">
+                            <StatusActions
+                              order={order}
+                              pending={updateStatus.isPending}
+                              onChange={(status) =>
+                                updateStatus.mutate({ id: order.id, status })
+                              }
+                            />
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -108,7 +147,63 @@ export default function PurchaseOrders() {
           </>
         )}
       </Card>
+
+      {creating && (
+        <NewPurchaseOrderDialog onClose={() => setCreating(false)} />
+      )}
     </>
+  );
+}
+
+/**
+ * Offers only the transitions the service accepts: Draft -> Confirmed ->
+ * Received, with cancellation allowed until receipt. A received order is
+ * terminal because stock has already moved.
+ */
+function StatusActions({
+  order,
+  pending,
+  onChange,
+}: {
+  order: PurchaseOrder;
+  pending: boolean;
+  onChange: (status: PurchaseOrder["status"]) => void;
+}) {
+  if (order.status === "Received" || order.status === "Cancelled") {
+    return <span className="text-xs text-ink-muted">—</span>;
+  }
+
+  return (
+    <span className="flex gap-1.5">
+      {order.status === "Draft" && (
+        <Button
+          variant="outline"
+          className="px-2.5 py-1 text-xs"
+          disabled={pending}
+          onClick={() => onChange("Confirmed")}
+        >
+          Confirm
+        </Button>
+      )}
+      {order.status === "Confirmed" && (
+        <Button
+          variant="outline"
+          className="px-2.5 py-1 text-xs"
+          disabled={pending}
+          onClick={() => onChange("Received")}
+        >
+          Receive
+        </Button>
+      )}
+      <Button
+        variant="ghost"
+        className="px-2.5 py-1 text-xs"
+        disabled={pending}
+        onClick={() => onChange("Cancelled")}
+      >
+        Cancel
+      </Button>
+    </span>
   );
 }
 

@@ -12,6 +12,7 @@ import {
   useInviteMember,
   useMembers,
   useRoles,
+  useUpdateMemberRoles,
   useUpdateMemberStatus,
   type Member,
 } from "../members";
@@ -26,6 +27,8 @@ export default function Members() {
   const { data: members, isPending, isError } = useMembers();
   const { data: roles } = useRoles();
   const setStatus = useUpdateMemberStatus();
+  const setRoles = useUpdateMemberRoles();
+  const roleCodes = (roles ?? []).map((role) => role.code);
 
   const th =
     "px-2.5 py-2.5 text-left text-xs font-medium text-ink-secondary whitespace-nowrap";
@@ -66,6 +69,7 @@ export default function Members() {
                     member={member}
                     canManage={canManage}
                     isSelf={member.user_id === session?.user_id}
+                    roleCodes={roleCodes}
                     onToggleStatus={() =>
                       setStatus.mutate({
                         id: member.membership_id,
@@ -73,7 +77,10 @@ export default function Members() {
                           member.status === "active" ? "suspended" : "active",
                       })
                     }
-                    pending={setStatus.isPending}
+                    onChangeRole={(role) =>
+                      setRoles.mutate({ id: member.membership_id, roles: [role] })
+                    }
+                    pending={setStatus.isPending || setRoles.isPending}
                   />
                 ))}
               </tbody>
@@ -81,13 +88,22 @@ export default function Members() {
           </div>
         )}
 
-        {setStatus.error ? (
-          <p role="alert" className="border-t border-hairline-soft px-4 py-3 text-sm text-status-critical">
-            {setStatus.error instanceof ApiError
-              ? setStatus.error.message
-              : "Could not update the member."}
+        {/* Both refusals must be visible: the server rejects demoting or
+            suspending a tenant's last owner, and silently swallowing that would
+            leave the table showing a change that never happened. */}
+        {(setStatus.error || setRoles.error) && (
+          <p
+            role="alert"
+            className="border-t border-hairline-soft px-4 py-3 text-sm text-status-critical"
+          >
+            {(() => {
+              const failure = setStatus.error ?? setRoles.error;
+              return failure instanceof ApiError
+                ? failure.message
+                : "Could not update the member.";
+            })()}
           </p>
-        ) : null}
+        )}
       </Card>
     </>
   );
@@ -97,16 +113,25 @@ function MemberRow({
   member,
   canManage,
   isSelf,
+  roleCodes,
   onToggleStatus,
+  onChangeRole,
   pending,
 }: {
   member: Member;
   canManage: boolean;
   isSelf: boolean;
+  roleCodes: string[];
   onToggleStatus: () => void;
+  onChangeRole: (role: string) => void;
   pending: boolean;
 }) {
   const active = member.status === "active";
+  // The server refuses to let anyone edit their own membership, so editing
+  // controls are read-only for the signed-in user rather than showing a control
+  // whose every use would fail.
+  const editable = canManage && !isSelf;
+
   return (
     <tr className="transition-colors hover:bg-hairline-soft/50">
       <th scope="row" className="px-2.5 py-3 text-left text-xs font-medium text-ink">
@@ -120,11 +145,25 @@ function MemberRow({
         )}
       </td>
       <td className="px-2.5 py-3">
-        <span className="flex flex-wrap gap-1">
-          {member.roles.map((role) => (
-            <Badge key={role} tone="neutral">{role}</Badge>
-          ))}
-        </span>
+        {editable ? (
+          <select
+            value={member.roles[0] ?? ""}
+            onChange={(e) => onChangeRole(e.target.value)}
+            disabled={pending}
+            aria-label={`Role for ${member.display_name}`}
+            className="rounded-lg border border-hairline bg-surface px-2 py-1 text-xs text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-50"
+          >
+            {roleCodes.map((code) => (
+              <option key={code} value={code}>{code}</option>
+            ))}
+          </select>
+        ) : (
+          <span className="flex flex-wrap gap-1">
+            {member.roles.map((role) => (
+              <Badge key={role} tone="neutral">{role}</Badge>
+            ))}
+          </span>
+        )}
       </td>
       <td className="px-2.5 py-3 text-xs whitespace-nowrap text-ink-secondary tnum">
         {formatDate(member.joined_at)}
