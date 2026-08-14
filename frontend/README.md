@@ -108,11 +108,14 @@ has two or more series, and a screen-reader `<SrTable>` data view.
   user and company with a sign-out action. The session is an HttpOnly cookie set
   by the backend, so `apiClient` sends `credentials: "include"` and never
   handles a token itself.
-- **Sales and inventory read live data**; the `base` dashboard widgets (KPIs,
-  cash flow, sales overview, top products, recent activities) are still
-  fixture-backed until their backend endpoints exist. `SalesOrdersTable`
-  paginates server-side and keeps the previous page on screen while the next
-  one loads.
+- **Every widget now reads live data.** The fixture module (`modules/base/data.ts`)
+  is gone. The backend returns figures only — icon, colour and formatting stay
+  in `kpis.ts` and the components, so a palette change never needs a server
+  deploy. Tables paginate server-side and keep the previous page on screen
+  while the next one loads.
+- **The KPI row shows four cards, three with sparklines.** Customers is a
+  distinct count per day, which does not accumulate into a meaningful line, so
+  that card renders without one rather than borrowing another card's shape.
 - Five `oxlint` fast-refresh warnings: three from manifest files exporting a
   const beside lazy component refs, two from `auth.tsx` and `AuthLayout.tsx`
   exporting a hook and a shared class string beside their components. Both are

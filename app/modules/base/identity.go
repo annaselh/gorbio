@@ -27,6 +27,7 @@ var (
 	ErrUnauthorized       = errors.New("unauthorized")
 	ErrForbidden          = errors.New("forbidden")
 	ErrTooManyAttempts    = errors.New("too many login attempts")
+	ErrInvalidInput       = errors.New("invalid input")
 )
 
 type Principal struct {

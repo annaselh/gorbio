@@ -74,6 +74,35 @@ The link expires in 24 hours and can be used once.`, name, link)
 	})
 }
 
+// sendInviteEmail carries a set-password link rather than a credential. An
+// invited account has no password hash at all, so this link is the only way in.
+func (s *AuthService) sendInviteEmail(ctx context.Context, user User, token string) error {
+	link := s.buildLink("/reset-password", token)
+	name := displayNameOrEmail(user)
+
+	text := fmt.Sprintf(`Hi %s,
+
+You have been invited to Orbio.
+
+Set your password to activate the account:
+%s
+
+The link expires in 7 days and can be used once.`, name, link)
+
+	htmlBody := fmt.Sprintf(`<p>Hi %s,</p>
+<p>You have been invited to Orbio.</p>
+<p><a href="%s">Set your password</a></p>
+<p>The link expires in 7 days and can be used once.</p>`,
+		html.EscapeString(name), html.EscapeString(link))
+
+	return s.mailer.Send(ctx, core.Message{
+		To:      []string{user.Email},
+		Subject: "You have been invited to Orbio",
+		Text:    text,
+		HTML:    htmlBody,
+	})
+}
+
 func displayNameOrEmail(user User) string {
 	if name := strings.TrimSpace(user.DisplayName); name != "" {
 		return name

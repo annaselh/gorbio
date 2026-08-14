@@ -40,6 +40,8 @@ func seedSystemAuthorization(db *gorm.DB) error {
 		{ID: uuid.New(), Code: "sales.manage", Module: "sales", Action: "manage", Description: "Create and modify sales orders"},
 		{ID: uuid.New(), Code: "inventory.read", Module: "inventory", Action: "read", Description: "View stock items and levels"},
 		{ID: uuid.New(), Code: "inventory.manage", Module: "inventory", Action: "manage", Description: "Create and adjust stock items"},
+		{ID: uuid.New(), Code: "procurement.read", Module: "procurement", Action: "read", Description: "View vendors and purchase orders"},
+		{ID: uuid.New(), Code: "procurement.manage", Module: "procurement", Action: "manage", Description: "Maintain vendors and raise purchase orders"},
 	}
 	if err := db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "code"}}, DoNothing: true}).Create(&permissions).Error; err != nil {
 		return fmt.Errorf("seed permissions: %w", err)

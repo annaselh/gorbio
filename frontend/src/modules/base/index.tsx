@@ -3,6 +3,7 @@ import type { ModuleManifest } from "@/core/types";
 import { PlaceholderPage } from "@/shared/ui/PlaceholderPage";
 
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Members = lazy(() => import("./pages/Members"));
 
 /**
  * The root module. Owns the dashboard and the shell-level "Main" and "Settings"
@@ -16,7 +17,7 @@ export const baseModule: ModuleManifest = {
     { path: "/calendar", element: <PlaceholderPage title="Calendar" icon="calendar" /> },
     { path: "/discuss", element: <PlaceholderPage title="Discuss" icon="discuss" /> },
     { path: "/tasks", element: <PlaceholderPage title="Tasks" icon="tasks" /> },
-    { path: "/settings/users", element: <PlaceholderPage title="Users & Roles" icon="users" /> },
+    { path: "/settings/users", element: <Members /> },
     { path: "/settings/company", element: <PlaceholderPage title="Company" icon="company" /> },
     { path: "/settings/preferences", element: <PlaceholderPage title="Preferences" icon="preferences" /> },
     { path: "/settings/integrations", element: <PlaceholderPage title="Integrations" icon="integrations" /> },

@@ -121,6 +121,41 @@ permission; see `modules/sales/routes.go` for the pattern.
 | GET | `/api/inventory/items/:id` | `inventory.read` | One stock item |
 | POST | `/api/inventory/items` | `inventory.manage` | Create a stock item |
 | POST | `/api/inventory/items/:id/adjust` | `inventory.manage` | Signed quantity delta |
+| GET | `/api/procurement/vendors` | `procurement.read` | Vendor list; `search`, `status` |
+| GET | `/api/procurement/vendors/:id` | `procurement.read` | One vendor |
+| POST | `/api/procurement/vendors` | `procurement.manage` | Create a vendor |
+| PUT | `/api/procurement/vendors/:id` | `procurement.manage` | Update vendor details |
+| PUT | `/api/procurement/vendors/:id/status` | `procurement.manage` | Activate or deactivate |
+| GET | `/api/procurement/orders` | `procurement.read` | Purchase orders; `status`, `vendor_id` |
+| GET | `/api/procurement/orders/:id` | `procurement.read` | One purchase order with lines |
+| POST | `/api/procurement/orders` | `procurement.manage` | Raise a draft purchase order |
+| PUT | `/api/procurement/orders/:id/status` | `procurement.manage` | Confirm, receive or cancel |
+| GET | `/api/members` | `membership.read` | People with access to the tenant |
+| GET | `/api/roles` | `membership.read` | Assignable roles |
+| POST | `/api/members` | `membership.manage` | Invite; mails a set-password link |
+| PUT | `/api/members/:id/roles` | `membership.manage` | Replace a member's roles |
+| PUT | `/api/members/:id/status` | `membership.manage` | Suspend or reactivate |
+| GET | `/api/dashboard/summary` | `tenant.read` | KPI figures with month-over-month deltas |
+| GET | `/api/dashboard/sales-series` | `tenant.read` | Daily revenue, orders and purchases |
+| GET | `/api/dashboard/top-products` | `tenant.read` | SKUs ranked by confirmed revenue |
+| GET | `/api/dashboard/cash-flow` | `tenant.read` | Confirmed income against purchase spend |
+| GET | `/api/dashboard/activities` | `tenant.read` | Recent business events from the audit trail |
+
+An invited user is created with **no password hash**: sign-in is impossible
+until they complete the emailed reset, so a credential is never transmitted.
+Suspending a membership revokes that member's sessions immediately, and the
+service refuses to remove or demote a tenant's last active owner.
+
+The dashboard module depends on base, sales, inventory and procurement rather
+than the reverse - putting these queries in base would invert the dependency
+every other module relies on. Only *Confirmed* sales count as revenue and only
+*Confirmed* or *Received* purchases count as spend: a draft is a proposal and a
+cancelled order never happened. Gross margin is revenue minus purchase spend,
+which is the closest honest figure without cost-of-goods tracking. Cash flow
+reports two slices, not three; the mockup's "Other" category has no source in
+the data model and inventing one would put a fabricated figure on a finance
+chart. The activity feed reads the shared audit trail rather than a table of its
+own, so it cannot drift from what actually happened.
 
 Sales money is stored in minor currency units as `int64`. Binary floating point
 cannot represent `0.1` exactly, so summing float lines drifts; an order total a

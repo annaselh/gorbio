@@ -3,11 +3,12 @@ import { Sparkline } from "@/shared/charts/Sparkline";
 import { SrTable } from "@/shared/charts/SrTable";
 import { resolveIcon } from "@/shared/icons";
 import { formatNumber, formatPercent } from "@/shared/format";
-import type { Kpi } from "../data";
+import type { KpiCard } from "../kpis";
 
-export function StatCard({ kpi }: { kpi: Kpi }) {
+export function StatCard({ kpi }: { kpi: KpiCard }) {
   const Icon = resolveIcon(kpi.icon);
   const up = kpi.delta >= 0;
+  const hasSpark = kpi.spark.length > 0;
 
   return (
     <Card className="overflow-hidden">
@@ -40,21 +41,46 @@ export function StatCard({ kpi }: { kpi: Kpi }) {
         </p>
       </div>
 
+      {/* Reserve the strip even without a series so the four cards stay the
+          same height and the row does not go ragged. */}
       <div className="mt-2 h-16">
-        <Sparkline
-          data={kpi.spark}
-          color={kpi.tint}
-          seriesName={kpi.label}
-          formatValue={(v) => formatNumber(v)}
-          formatLabel={(d) => d}
-        />
+        {hasSpark && (
+          <Sparkline
+            data={kpi.spark}
+            color={kpi.tint}
+            seriesName={kpi.label}
+            formatValue={(v) => formatNumber(v)}
+            formatLabel={(d) => d}
+          />
+        )}
       </div>
 
-      <SrTable
-        caption={`${kpi.label} trend`}
-        columns={["Date", kpi.label]}
-        rows={kpi.spark.map((p) => [p.date, formatNumber(p.value)])}
-      />
+      {hasSpark && (
+        <SrTable
+          caption={`${kpi.label} trend`}
+          columns={["Date", kpi.label]}
+          rows={kpi.spark.map((p) => [p.date, formatNumber(p.value)])}
+        />
+      )}
+    </Card>
+  );
+}
+
+/** Placeholder with the same footprint, so the grid does not jump on load. */
+export function StatCardSkeleton() {
+  return (
+    <Card className="overflow-hidden">
+      <div className="px-5 pt-5">
+        <div className="flex items-start gap-3.5">
+          <span className="size-11 shrink-0 animate-pulse rounded-xl bg-hairline-soft" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <span className="block h-4 w-24 animate-pulse rounded bg-hairline-soft" />
+            <span className="block h-6 w-32 animate-pulse rounded bg-hairline-soft" />
+          </div>
+        </div>
+        <span className="mt-3 block h-3 w-28 animate-pulse rounded bg-hairline-soft" />
+      </div>
+      <div className="mt-2 h-16" />
     </Card>
   );
 }

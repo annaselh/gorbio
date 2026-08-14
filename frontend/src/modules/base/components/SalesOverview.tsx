@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   Area,
   AreaChart,
@@ -9,50 +9,70 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardHeader } from "@/shared/ui/Card";
-import { Select } from "@/shared/ui/Select";
 import { TooltipShell } from "@/shared/charts/ChartTooltip";
 import { SrTable } from "@/shared/charts/SrTable";
 import { formatIDR, formatIDRCompact } from "@/shared/format";
-import { salesLastMonth, salesThisMonth } from "../data";
+import { useSalesSeries } from "../api";
 
 const THIS_MONTH = "var(--color-spark-sales)";
 const LAST_MONTH = "#9CA3AF";
-const RANGES = ["This Month", "Last 3 Months", "This Year"] as const;
 
 const MONTH_LABEL = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function dayLabel(day: number) {
-  return `${day} ${MONTH_LABEL[4]}`;
+/** Labels come from the series dates, so the axis follows the real month. */
+function makeDayLabel(points: { date: string }[]) {
+  const monthIndex = points[0] ? new Date(points[0].date).getUTCMonth() : 0;
+  return (day: number) => `${day} ${MONTH_LABEL[monthIndex]}`;
 }
 
 export function SalesOverview() {
-  const [range, setRange] = useState<string>(RANGES[0]);
+  const { data: series, isPending, isError } = useSalesSeries();
+
+  const current = useMemo(() => series?.current ?? [], [series]);
+  const previous = useMemo(() => series?.previous ?? [], [series]);
 
   // Two months are compared day-over-day, so they share one x scale by day index.
   const data = useMemo(
     () =>
-      salesThisMonth.map((p, i) => ({
+      current.map((point, i) => ({
         day: i + 1,
-        thisMonth: p.value,
-        lastMonth: salesLastMonth[i]?.value ?? null,
+        thisMonth: point.revenue,
+        lastMonth: previous[i]?.revenue ?? null,
       })),
-    [],
+    [current, previous],
   );
+
+  const dayLabel = useMemo(() => makeDayLabel(current), [current]);
+
+  // The axis is fixed to the data rather than a hardcoded ceiling: a tenant
+  // whose revenue exceeds the mockup's 200M would otherwise draw off-chart.
+  const peak = useMemo(
+    () =>
+      data.reduce(
+        (max, row) => Math.max(max, row.thisMonth, row.lastMonth ?? 0),
+        0,
+      ),
+    [data],
+  );
+  const yMax = peak > 0 ? Math.ceil(peak / 50_000_000) * 50_000_000 : 100_000_000;
+  const yTicks = Array.from({ length: 5 }, (_, i) => (yMax / 4) * i);
+
+  if (isPending || isError) {
+    return (
+      <Card className="flex h-full flex-col">
+        <CardHeader title="Sales Overview" />
+        <div className="grid flex-1 place-items-center px-4 py-16">
+          <p className="text-sm text-ink-secondary">
+            {isPending ? "Loading sales…" : "Sales data is unavailable right now."}
+          </p>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="flex h-full flex-col">
-      <CardHeader
-        title="Sales Overview"
-        action={
-          <Select
-            aria-label="Sales overview range"
-            value={range}
-            onChange={setRange}
-            options={RANGES}
-            className="text-xs"
-          />
-        }
-      />
+      <CardHeader title="Sales Overview" />
 
       {/* Legend is always present for 2 series; solid vs dashed carries identity
           a second time, so the pair does not rely on colour alone. */}
@@ -93,8 +113,8 @@ export function SalesOverview() {
               dy={8}
             />
             <YAxis
-              domain={[0, 200_000_000]}
-              ticks={[0, 50_000_000, 100_000_000, 150_000_000, 200_000_000]}
+              domain={[0, yMax]}
+              ticks={yTicks}
               tickFormatter={(v) => formatIDRCompact(Number(v))}
               tickLine={false}
               axisLine={false}

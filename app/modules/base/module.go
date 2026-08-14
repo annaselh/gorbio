@@ -26,6 +26,12 @@ func (m *Module) Register(app *core.App) error {
 		return err
 	}
 
+	// Published so any module can write to the shared audit trail without
+	// importing base's models.
+	if err := app.Services.Register(AuditServiceName, NewAuditService(app.DB)); err != nil {
+		return err
+	}
+
 	app.Router.POST("/api/auth/login", auth.loginHandler)
 	app.Router.POST("/api/auth/logout", auth.RequireAuth(), auth.logoutHandler)
 	app.Router.GET("/api/auth/me", auth.RequireAuth(), auth.meHandler)
@@ -38,6 +44,18 @@ func (m *Module) Register(app *core.App) error {
 	app.Router.POST("/api/auth/password/change", auth.RequireAuth(), auth.changePasswordHandler)
 	app.Router.POST("/api/auth/email/verify", auth.verifyEmailHandler)
 	app.Router.POST("/api/auth/email/resend", auth.RequireAuth(), auth.resendVerificationHandler)
+
+	// Tenant administration.
+	app.Router.GET("/api/members",
+		auth.RequireAuth(), RequirePermission(PermissionMembershipRead), auth.listMembersHandler)
+	app.Router.GET("/api/roles",
+		auth.RequireAuth(), RequirePermission(PermissionMembershipRead), auth.listRolesHandler)
+	app.Router.POST("/api/members",
+		auth.RequireAuth(), RequirePermission(PermissionMembershipManage), auth.inviteMemberHandler)
+	app.Router.PUT("/api/members/:id/roles",
+		auth.RequireAuth(), RequirePermission(PermissionMembershipManage), auth.updateMemberRolesHandler)
+	app.Router.PUT("/api/members/:id/status",
+		auth.RequireAuth(), RequirePermission(PermissionMembershipManage), auth.updateMemberStatusHandler)
 	return nil
 }
 

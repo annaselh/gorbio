@@ -1,40 +1,68 @@
-import { useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { Card, CardHeader } from "@/shared/ui/Card";
-import { Select } from "@/shared/ui/Select";
 import { TooltipShell } from "@/shared/charts/ChartTooltip";
 import { SrTable } from "@/shared/charts/SrTable";
 import { formatIDR, formatIDRCompact } from "@/shared/format";
-import { cashFlow } from "../data";
+import { useCashFlow } from "../api";
 
-const RANGES = ["This Month", "Last 3 Months", "This Year"] as const;
+/**
+ * Validated categorical palette (mirrors --color-chart-1..2 in index.css).
+ * Literal hex rather than var() because recharts reads these into SVG
+ * attributes and the tooltip swatch. Keyed by slice name so the colour follows
+ * the meaning, never the array position.
+ */
+const SLICE_COLOR: Record<string, string> = {
+  Income: "#059669",
+  Expense: "#EA580C",
+};
+const FALLBACK_COLOR = "#2563EB";
 
 export function CashFlow() {
-  const [range, setRange] = useState<string>(RANGES[0]);
-  const total = cashFlow.reduce((sum, s) => sum + s.value, 0);
-  const pct = (v: number) => Math.round((v / total) * 100);
+  const { data: slices, isPending, isError } = useCashFlow();
+
+  if (isPending || isError) {
+    return (
+      <Card className="flex h-full flex-col">
+        <CardHeader title="Cash Flow" />
+        <div className="grid flex-1 place-items-center px-4 py-12">
+          <p className="text-sm text-ink-secondary">
+            {isPending ? "Loading cash flow…" : "Cash flow is unavailable right now."}
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
+  const total = slices.reduce((sum, s) => sum + s.value, 0);
+  const pct = (v: number) => (total > 0 ? Math.round((v / total) * 100) : 0);
+  const colored = slices.map((slice) => ({
+    ...slice,
+    color: SLICE_COLOR[slice.name] ?? FALLBACK_COLOR,
+  }));
+
+  if (total === 0) {
+    return (
+      <Card className="flex h-full flex-col">
+        <CardHeader title="Cash Flow" />
+        <div className="grid flex-1 place-items-center px-4 py-12">
+          <p className="text-sm text-ink-secondary">
+            No confirmed income or spend this month.
+          </p>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="flex h-full flex-col">
-      <CardHeader
-        title="Cash Flow"
-        action={
-          <Select
-            aria-label="Cash flow range"
-            value={range}
-            onChange={setRange}
-            options={RANGES}
-            className="text-xs"
-          />
-        }
-      />
+      <CardHeader title="Cash Flow" />
 
       <div className="flex flex-1 flex-wrap items-center gap-3 px-4 pb-5">
         <div className="relative mx-auto size-[152px] shrink-0">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
-                data={cashFlow}
+                data={colored}
                 dataKey="value"
                 nameKey="name"
                 innerRadius="66%"
@@ -48,23 +76,23 @@ export function CashFlow() {
                 strokeWidth={2}
                 isAnimationActive={false}
               >
-                {cashFlow.map((s) => (
-                  <Cell key={s.name} fill={s.color} />
+                {colored.map((slice) => (
+                  <Cell key={slice.name} fill={slice.color} />
                 ))}
               </Pie>
               <Tooltip
                 content={({ active, payload }) => {
                   if (!active || !payload?.length) return null;
-                  const slice = payload[0].payload as (typeof cashFlow)[number];
+                  const slice = payload[0].payload as (typeof colored)[number];
                   return (
                     <TooltipShell
-                      label="Cash Flow"
+                      label={slice.name}
                       rows={[
                         {
                           key: slice.name,
                           color: slice.color,
-                          name: slice.name,
-                          value: `${formatIDR(slice.value)} · ${pct(slice.value)}%`,
+                          name: `${pct(slice.value)}%`,
+                          value: formatIDR(slice.value),
                         },
                       ]}
                     />
@@ -74,36 +102,35 @@ export function CashFlow() {
             </PieChart>
           </ResponsiveContainer>
 
-          <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
-            <div>
-              <p className="text-[19px] font-bold text-ink tnum">
-                {formatIDRCompact(total)}
+          <div className="pointer-events-none absolute inset-0 grid place-items-center">
+            <div className="text-center">
+              <p className="text-[11px] text-ink-muted">Net</p>
+              <p className="text-sm font-bold text-ink tnum">
+                {formatIDRCompact(
+                  (colored.find((s) => s.name === "Income")?.value ?? 0) -
+                    (colored.find((s) => s.name === "Expense")?.value ?? 0),
+                )}
               </p>
-              <p className="text-xs text-ink-muted">Total</p>
             </div>
           </div>
         </div>
 
-        {/* Direct labels: every slice carries name + value + share in text. */}
-        <ul className="min-w-[132px] flex-1 space-y-3.5">
-          {cashFlow.map((s) => (
-            <li key={s.name} className="flex items-start gap-2.5">
+        <ul className="mx-auto flex-1 space-y-2.5">
+          {colored.map((slice) => (
+            <li key={slice.name} className="flex items-center gap-2.5">
               <span
                 aria-hidden
-                className="mt-1 size-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: s.color }}
+                className="size-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: slice.color }}
               />
-              <span className="min-w-0 flex-1">
-                <span className="block text-xs text-ink-secondary">
-                  {s.name}
-                </span>
-                {/* nowrap: "Rp 850.000.000" must not break across two lines */}
-                <span className="block text-xs font-semibold whitespace-nowrap text-ink tnum">
-                  {formatIDR(s.value)}
-                </span>
+              <span className="flex-1 text-xs text-ink-secondary">
+                {slice.name}
               </span>
-              <span className="shrink-0 text-xs font-medium text-ink-secondary tnum">
-                {pct(s.value)}%
+              <span className="text-xs font-semibold text-ink tnum">
+                {formatIDRCompact(slice.value)}
+              </span>
+              <span className="w-9 text-right text-xs text-ink-muted tnum">
+                {pct(slice.value)}%
               </span>
             </li>
           ))}
@@ -113,7 +140,7 @@ export function CashFlow() {
       <SrTable
         caption="Cash flow breakdown"
         columns={["Category", "Amount", "Share"]}
-        rows={cashFlow.map((s) => [s.name, formatIDR(s.value), `${pct(s.value)}%`])}
+        rows={colored.map((s) => [s.name, formatIDR(s.value), `${pct(s.value)}%`])}
       />
     </Card>
   );

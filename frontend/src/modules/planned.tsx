@@ -9,7 +9,7 @@ import { PlaceholderPage } from "@/shared/ui/PlaceholderPage";
  */
 const PLANNED = [
   { name: "crm", label: "Customers (CRM)", icon: "customers", path: "/crm/customers", sequence: 110, tint: "#F97316" },
-  { name: "purchase", label: "Purchase", icon: "purchase", path: "/purchase/orders", sequence: 130, tint: "#0D9488" },
+  // "purchase" graduated to the real procurement module; see modules/procurement.
   { name: "accounting", label: "Accounting", icon: "accounting", path: "/accounting", sequence: 150, tint: "#F59E0B" },
   { name: "hr", label: "HR", icon: "hr", path: "/hr", sequence: 160, tint: "#8B5CF6" },
   { name: "projects", label: "Projects", icon: "projects", path: "/projects", sequence: 170, tint: "#64748B" },
