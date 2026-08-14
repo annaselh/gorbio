@@ -36,6 +36,10 @@ func seedSystemAuthorization(db *gorm.DB) error {
 		{ID: uuid.New(), Code: "tenant.manage", Module: "base", Action: "manage", Description: "Manage tenant settings"},
 		{ID: uuid.New(), Code: "membership.read", Module: "base", Action: "read", Description: "View tenant members"},
 		{ID: uuid.New(), Code: "membership.manage", Module: "base", Action: "manage", Description: "Manage tenant members and roles"},
+		{ID: uuid.New(), Code: "sales.read", Module: "sales", Action: "read", Description: "View sales orders"},
+		{ID: uuid.New(), Code: "sales.manage", Module: "sales", Action: "manage", Description: "Create and modify sales orders"},
+		{ID: uuid.New(), Code: "inventory.read", Module: "inventory", Action: "read", Description: "View stock items and levels"},
+		{ID: uuid.New(), Code: "inventory.manage", Module: "inventory", Action: "manage", Description: "Create and adjust stock items"},
 	}
 	if err := db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "code"}}, DoNothing: true}).Create(&permissions).Error; err != nil {
 		return fmt.Errorf("seed permissions: %w", err)
@@ -56,13 +60,15 @@ func seedSystemAuthorization(db *gorm.DB) error {
 	if err := db.Order("code ASC").Find(&seededPermissions).Error; err != nil {
 		return fmt.Errorf("load seeded permissions: %w", err)
 	}
-	assignments := make([]RolePermission, 0, len(seededPermissions)*2)
+	assignments := make([]RolePermission, 0, len(seededPermissions)*3)
 	for _, permission := range seededPermissions {
+		// Owner holds everything; admin holds everything except tenant-level
+		// settings; member is read-only across whichever modules are installed.
 		assignments = append(assignments, RolePermission{RoleID: owner.ID, PermissionID: permission.ID})
 		if permission.Code != "tenant.manage" {
 			assignments = append(assignments, RolePermission{RoleID: admin.ID, PermissionID: permission.ID})
 		}
-		if permission.Code == "tenant.read" {
+		if permission.Action == "read" {
 			assignments = append(assignments, RolePermission{RoleID: member.ID, PermissionID: permission.ID})
 		}
 	}

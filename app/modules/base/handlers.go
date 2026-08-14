@@ -25,14 +25,17 @@ func (s *AuthService) loginHandler(c *gin.Context) {
 		IPAddress: c.ClientIP(), UserAgent: c.Request.UserAgent(),
 	})
 	if err != nil {
-		if errors.Is(err, ErrInvalidCredentials) {
+		switch {
+		case errors.Is(err, ErrInvalidCredentials):
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid email or password"})
-			return
+		case errors.Is(err, ErrTooManyAttempts):
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many login attempts, try again later"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "login failed"})
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "login failed"})
 		return
 	}
-	setSessionCookie(c, result.Token, result.ExpiresAt)
+	s.setSessionCookie(c, result.Token, result.ExpiresAt)
 	c.JSON(http.StatusOK, gin.H{"user_id": result.Principal.UserID, "tenant_id": result.Principal.TenantID, "expires_at": result.ExpiresAt})
 }
 
@@ -42,7 +45,7 @@ func (s *AuthService) logoutHandler(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "logout failed"})
 		return
 	}
-	clearSessionCookie(c)
+	s.clearSessionCookie(c)
 	c.Status(http.StatusNoContent)
 }
 

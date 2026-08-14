@@ -1,6 +1,9 @@
 package salesdiscount
 
-import "github.com/annaselh/gorbio/core"
+import (
+	"github.com/annaselh/gorbio/core"
+	"github.com/annaselh/gorbio/modules/base"
+)
 
 type Extension struct{}
 
@@ -21,8 +24,17 @@ func (e *Extension) Depends() []string {
 }
 
 func (e *Extension) Register(app *core.App) error {
+	auth, err := base.AuthFromApp(app)
+	if err != nil {
+		return err
+	}
+
+	// An extension mutates its host module's data, so it must be guarded at
+	// least as strictly as the module's own write routes.
 	app.Router.POST(
 		"/api/sales/orders/:id/discount",
+		auth.RequireAuth(),
+		base.RequirePermission("sales.manage"),
 		applyDiscount,
 	)
 	return nil

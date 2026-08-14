@@ -10,6 +10,7 @@ type App struct {
 	Services   *ServiceRegistry
 	Hooks      *HookManager
 	Events     *EventBus
+	Settings   Settings
 }
 
 func NewApp(
@@ -26,5 +27,13 @@ func NewApp(
 		Services:   NewServiceRegistry(),
 		Hooks:      NewHookManager(),
 		Events:     NewEventBus(),
+		Settings:   DefaultSettings(),
 	}
+}
+
+// WithSettings overrides the production-safe defaults. Call it during wiring,
+// before Register, so modules observe the final values.
+func (app *App) WithSettings(settings Settings) *App {
+	app.Settings = settings
+	return app
 }

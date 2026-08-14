@@ -46,13 +46,26 @@ func PrincipalFromContext(c *gin.Context) (Principal, bool) {
 	return principal, ok
 }
 
-func setSessionCookie(c *gin.Context, token string, expiresAt time.Time) {
+// sameSiteMode pairs with Secure: a cross-site SPA needs SameSite=None, which
+// browsers only honour on a Secure cookie. Over plain HTTP in development that
+// combination is rejected outright, so fall back to Lax there.
+func (s *AuthService) sameSiteMode() http.SameSite {
+	if s.cookieSecure {
+		return http.SameSiteNoneMode
+	}
+	return http.SameSiteLaxMode
+}
+
+func (s *AuthService) setSessionCookie(c *gin.Context, token string, expiresAt time.Time) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name: SessionCookieName, Value: token, Path: "/", Expires: expiresAt,
-		HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
+		HttpOnly: true, Secure: s.cookieSecure, SameSite: s.sameSiteMode(),
 	})
 }
 
-func clearSessionCookie(c *gin.Context) {
-	http.SetCookie(c.Writer, &http.Cookie{Name: SessionCookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+func (s *AuthService) clearSessionCookie(c *gin.Context) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name: SessionCookieName, Value: "", Path: "/", MaxAge: -1,
+		HttpOnly: true, Secure: s.cookieSecure, SameSite: s.sameSiteMode(),
+	})
 }

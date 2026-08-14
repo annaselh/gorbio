@@ -21,7 +21,7 @@ func (m *Module) Migrate(app *core.App) error {
 }
 
 func (m *Module) Register(app *core.App) error {
-	auth := NewAuthService(app.DB)
+	auth := NewAuthService(app.DB, app.Settings)
 	if err := app.Services.Register(AuthServiceName, auth); err != nil {
 		return err
 	}

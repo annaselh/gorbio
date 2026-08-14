@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/annaselh/gorbio/core"
@@ -24,6 +25,7 @@ var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrUnauthorized       = errors.New("unauthorized")
 	ErrForbidden          = errors.New("forbidden")
+	ErrTooManyAttempts    = errors.New("too many login attempts")
 )
 
 type Principal struct {
@@ -61,13 +63,46 @@ type BootstrapOwnerInput struct {
 	Password    string
 }
 
+// loginRateLimit bounds password attempts per client IP. The per-account
+// lockout below is a second, independent layer: on its own it lets anyone who
+// knows an email address lock that account out at will, so the IP window is what
+// actually absorbs a spray.
+const (
+	loginRateLimit  = 10
+	loginRateWindow = 15 * time.Minute
+)
+
+// timingEqualizerPassword feeds a throwaway Argon2 verification on the
+// account-not-found path so a missing email costs the same wall-clock time as a
+// wrong password. Without it, response latency enumerates valid accounts.
+const timingEqualizerPassword = "gorbio-timing-equalizer-placeholder"
+
+var timingEqualizerHash = sync.OnceValue(func() string {
+	hash, err := hashPassword(timingEqualizerPassword)
+	if err != nil {
+		return ""
+	}
+	return hash
+})
+
 type AuthService struct {
-	db         *gorm.DB
-	sessionTTL time.Duration
+	db           *gorm.DB
+	sessionTTL   time.Duration
+	cookieSecure bool
+	loginLimiter *core.RateLimiter
 }
 
-func NewAuthService(db *gorm.DB) *AuthService {
-	return &AuthService{db: db, sessionTTL: 12 * time.Hour}
+func NewAuthService(db *gorm.DB, settings core.Settings) *AuthService {
+	ttl := settings.SessionTTL
+	if ttl <= 0 {
+		ttl = core.DefaultSettings().SessionTTL
+	}
+	return &AuthService{
+		db:           db,
+		sessionTTL:   ttl,
+		cookieSecure: settings.CookieSecure,
+		loginLimiter: core.NewRateLimiter(loginRateLimit, loginRateWindow),
+	}
 }
 
 func AuthFromApp(app *core.App) (*AuthService, error) {
@@ -83,14 +118,27 @@ func AuthFromApp(app *core.App) (*AuthService, error) {
 }
 
 func (s *AuthService) Login(ctx context.Context, input LoginInput) (*LoginResult, error) {
+	if input.IPAddress != "" && !s.loginLimiter.Allow(input.IPAddress) {
+		return nil, ErrTooManyAttempts
+	}
+
 	email := strings.ToLower(strings.TrimSpace(input.Email))
 	var user User
 	if err := s.db.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
+		// Burn equivalent CPU so a missing account is indistinguishable by time.
+		verifyPassword(timingEqualizerHash(), input.Password)
 		return nil, ErrInvalidCredentials
 	}
 
 	now := time.Now().UTC()
-	if user.Status != UserStatusActive || (user.LockedUntil != nil && user.LockedUntil.After(now)) || !verifyPassword(user.PasswordHash, input.Password) {
+	// Evaluate the password unconditionally rather than letting || short-circuit
+	// on status or lockout: an early return would make a disabled or locked
+	// account answer measurably faster than a merely wrong password.
+	passwordValid := verifyPassword(user.PasswordHash, input.Password)
+	accountActive := user.Status == UserStatusActive
+	accountUnlocked := user.LockedUntil == nil || !user.LockedUntil.After(now)
+
+	if !passwordValid || !accountActive || !accountUnlocked {
 		s.recordFailedLogin(ctx, &user, now)
 		return nil, ErrInvalidCredentials
 	}
@@ -126,6 +174,11 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (*LoginResult
 	principal, err := s.principalForMembership(ctx, user.ID, session.ID, membership)
 	if err != nil {
 		return nil, err
+	}
+	// A legitimate sign-in forgives earlier failures from this address, so a
+	// shared NAT egress cannot lock out its own users.
+	if input.IPAddress != "" {
+		s.loginLimiter.Reset(input.IPAddress)
 	}
 	s.recordAudit(ctx, &user.ID, &membership.TenantID, "auth.login", "session", session.ID.String(), input.IPAddress, input.UserAgent)
 	return &LoginResult{Token: token, ExpiresAt: session.ExpiresAt, Principal: principal}, nil

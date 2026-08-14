@@ -22,6 +22,12 @@ func (r *Router) Handler() http.Handler {
 	return r.engine
 }
 
+// Use installs global middleware. Call it before modules register their routes
+// so cross-cutting concerns such as CORS wrap every handler.
+func (r *Router) Use(middleware ...gin.HandlerFunc) {
+	r.engine.Use(middleware...)
+}
+
 func (r *Router) GET(
 	path string,
 	handlers ...gin.HandlerFunc,

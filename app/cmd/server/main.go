@@ -43,6 +43,11 @@ func run() error {
 
 	router := core.NewRouter()
 
+	// Global middleware must be installed before modules register routes.
+	if len(cfg.CORSOrigins) > 0 {
+		router.Use(core.CORS(cfg.CORSOrigins))
+	}
+
 	moduleRegistry := core.NewRegistry()
 
 	extensionRegistry := core.NewExtensionRegistry()
@@ -52,7 +57,13 @@ func run() error {
 		router,
 		moduleRegistry,
 		extensionRegistry,
-	)
+	).WithSettings(core.Settings{
+		Env: cfg.Env,
+		// Secure cookies are dropped by browsers over plain HTTP, which would
+		// make login silently fail on a local http://localhost dev server.
+		CookieSecure: cfg.IsProduction(),
+		SessionTTL:   cfg.SessionTTL,
+	})
 
 	if err := modules.RegisterAll(moduleRegistry); err != nil {
 		return fmt.Errorf("add modules: %w", err)
@@ -77,7 +88,7 @@ func run() error {
 	}
 
 	server := &http.Server{
-		Addr:              ":8080",
+		Addr:              cfg.HTTPAddr,
 		Handler:           router.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
