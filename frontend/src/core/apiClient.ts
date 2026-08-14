@@ -1,4 +1,10 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api/v1";
+/**
+ * The backend mounts routes directly under /api - see the Register method on
+ * each Go module - not under /api/v1. In development Vite proxies /api to
+ * localhost:8080; in production the SPA is served same-origin, or its origin is
+ * listed in CORS_ORIGINS on the server.
+ */
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -12,28 +18,22 @@ export class ApiError extends Error {
   }
 }
 
-let authToken: string | null = null;
-
-export function setAuthToken(token: string | null) {
-  authToken = token;
-}
-
 interface RequestOptions extends Omit<RequestInit, "body"> {
   body?: unknown;
-  /** Company scope — the backend is multi-tenant / multi-company (PRD-F-07). */
-  companyId?: string;
 }
 
 export async function request<T>(
   path: string,
-  { body, companyId, headers, ...init }: RequestOptions = {},
+  { body, headers, ...init }: RequestOptions = {},
 ): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...init,
+    // The session is an HttpOnly cookie the page cannot read, so it has to be
+    // attached by the browser. Without this the cookie is never sent and every
+    // authenticated call fails with 401.
+    credentials: "include",
     headers: {
       ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-      ...(companyId ? { "X-Company-Id": companyId } : {}),
       ...headers,
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -42,9 +42,11 @@ export async function request<T>(
   const payload = res.status === 204 ? null : await res.json().catch(() => null);
 
   if (!res.ok) {
+    // The Go handlers answer with {"error": "..."}; keep `message` as a
+    // fallback so a proxy or gateway error shape still surfaces something.
+    const problem = payload as { error?: string; message?: string } | null;
     const message =
-      (payload as { message?: string } | null)?.message ??
-      `${res.status} ${res.statusText}`;
+      problem?.error ?? problem?.message ?? `${res.status} ${res.statusText}`;
     throw new ApiError(res.status, payload, message);
   }
 

@@ -1,14 +1,16 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bell,
   ChevronDown,
   CircleHelp,
+  LogOut,
   Menu,
   MessageSquare,
   Plus,
   Search,
 } from "lucide-react";
 import { cn } from "@/shared/cn";
+import { useAuth } from "./auth";
 
 const iconButton =
   "grid size-9 cursor-pointer place-items-center rounded-lg text-ink-secondary transition-colors hover:bg-hairline-soft hover:text-ink";
@@ -88,28 +90,100 @@ export function Topbar({ onToggleNav }: { onToggleNav: () => void }) {
 
         <span aria-hidden className="mx-2 hidden h-7 w-px bg-hairline sm:block" />
 
-        <button
-          type="button"
-          className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1 py-1 transition-colors hover:bg-hairline-soft"
-        >
-          <span className="relative">
-            <span className="grid size-9 place-items-center rounded-full bg-gradient-to-br from-[#94A3B8] to-[#64748B] text-xs font-semibold text-white">
-              JD
-            </span>
-            <span
-              aria-hidden
-              className="absolute right-0 bottom-0 size-2.5 rounded-full border-2 border-surface bg-status-good"
-            />
-          </span>
-          <span className="hidden text-left sm:block">
-            <span className="block text-[13px] font-semibold text-ink">
-              John Doe
-            </span>
-            <span className="block text-xs text-ink-muted">Administrator</span>
-          </span>
-          <ChevronDown className="hidden size-4 text-ink-muted sm:block" />
-        </button>
+        <UserMenu />
       </div>
     </header>
+  );
+}
+
+/** Derives up to two initials from a display name, falling back to the email. */
+function initialsOf(name: string, email: string) {
+  const source = name.trim() || email.trim();
+  if (!source) return "?";
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return source.slice(0, 2).toUpperCase();
+}
+
+function UserMenu() {
+  const { session, logout } = useAuth();
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (!session) return null;
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1 py-1 transition-colors hover:bg-hairline-soft"
+      >
+        <span className="relative">
+          <span className="grid size-9 place-items-center rounded-full bg-gradient-to-br from-[#94A3B8] to-[#64748B] text-xs font-semibold text-white">
+            {initialsOf(session.display_name, session.email)}
+          </span>
+          <span
+            aria-hidden
+            className="absolute right-0 bottom-0 size-2.5 rounded-full border-2 border-surface bg-status-good"
+          />
+        </span>
+        <span className="hidden text-left sm:block">
+          <span className="block text-[13px] font-semibold text-ink">
+            {session.display_name || session.email}
+          </span>
+          <span className="block text-xs text-ink-muted">
+            {session.tenant_name}
+          </span>
+        </span>
+        <ChevronDown className="hidden size-4 text-ink-muted sm:block" />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-50 mt-2 w-56 rounded-xl border border-hairline bg-surface p-1.5 shadow-[0_8px_24px_rgba(16,24,40,0.12)]"
+        >
+          <div className="border-b border-hairline px-2.5 py-2">
+            <p className="truncate text-[13px] font-semibold text-ink">
+              {session.display_name || session.email}
+            </p>
+            <p className="truncate text-xs text-ink-muted">{session.email}</p>
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              void logout();
+            }}
+            className="mt-1 flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-ink transition-colors hover:bg-hairline-soft"
+          >
+            <LogOut className="size-4 text-ink-secondary" />
+            Sign out
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

@@ -39,7 +39,10 @@ src/
 │   ├── Topbar.tsx     search (⌘K), notifications, account
 │   ├── Slot.tsx       cross-module UI injection (the `_inherit` mirror)
 │   ├── DynamicForm.tsx server-driven form for runtime custom fields
-│   ├── apiClient.ts   fetch wrapper: auth token, company scope, ApiError
+│   ├── apiClient.ts   fetch wrapper: cookie credentials, ApiError
+│   ├── auth.tsx       session context: login, logout, permission checks
+│   ├── AuthGate.tsx   login screen until the session probe succeeds
+│   ├── LoginPage.tsx  email / password / optional company form
 │   └── AppRouter.tsx  router assembled from registry.routes
 │
 ├── modules/           BUSINESS — may use core, never each other
@@ -96,8 +99,14 @@ has two or more series, and a screen-reader `<SrTable>` data view.
 - **Light theme only.** The mockup specifies no dark palette; adding one means
   re-stepping the chart ramps against a dark surface and re-running the
   validator, not flipping the tokens.
-- **No auth.** `apiClient` carries a bearer token but nothing sets it; the user
-  and company in the chrome are static.
+- **Auth is wired.** `core/auth.tsx` holds the session, `AuthGate` renders the
+  login screen until `GET /api/auth/me` succeeds, and the topbar shows the real
+  user and company with a sign-out action. The session is an HttpOnly cookie set
+  by the backend, so `apiClient` sends `credentials: "include"` and never
+  handles a token itself.
+- **Module data is still fixture-backed except inventory**, which reads
+  `/api/inventory/items` through React Query. Sales and the dashboard widgets
+  remain static until their backend endpoints return real rows.
 - Three `oxlint` fast-refresh warnings come from manifest files exporting a
   const beside lazy component refs. Inherent to the manifest pattern; affects
   HMR granularity only.

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -252,6 +253,45 @@ func (s *AuthService) Authenticate(ctx context.Context, token string) (Principal
 		return Principal{}, fmt.Errorf("update session activity: %w", err)
 	}
 	return s.principalForMembership(ctx, session.UserID, session.ID, membership)
+}
+
+// Profile is the identity surface a signed-in client needs to render itself:
+// who the user is, which tenant the session is scoped to, and what they may do.
+type Profile struct {
+	UserID      uuid.UUID
+	Email       string
+	DisplayName string
+	TenantID    uuid.UUID
+	TenantSlug  string
+	TenantName  string
+	Permissions []string
+}
+
+// Profile resolves the display identity behind a Principal. The Principal
+// itself deliberately carries only ids and permission codes so it stays cheap
+// to pass around; names are fetched only when something is actually rendering.
+func (s *AuthService) Profile(ctx context.Context, principal Principal) (*Profile, error) {
+	var user User
+	if err := s.db.WithContext(ctx).Where("id = ?", principal.UserID).First(&user).Error; err != nil {
+		return nil, fmt.Errorf("load user profile: %w", err)
+	}
+
+	var tenant Tenant
+	if err := s.db.WithContext(ctx).Where("id = ?", principal.TenantID).First(&tenant).Error; err != nil {
+		return nil, fmt.Errorf("load tenant profile: %w", err)
+	}
+
+	permissions := make([]string, 0, len(principal.Permissions))
+	for code := range principal.Permissions {
+		permissions = append(permissions, code)
+	}
+	sort.Strings(permissions)
+
+	return &Profile{
+		UserID: user.ID, Email: user.Email, DisplayName: user.DisplayName,
+		TenantID: tenant.ID, TenantSlug: tenant.Slug, TenantName: tenant.Name,
+		Permissions: permissions,
+	}, nil
 }
 
 func (s *AuthService) Logout(ctx context.Context, sessionID uuid.UUID) error {

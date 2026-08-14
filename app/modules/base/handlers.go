@@ -3,7 +3,6 @@ package base
 import (
 	"errors"
 	"net/http"
-	"sort"
 
 	"github.com/gin-gonic/gin"
 )
@@ -50,11 +49,25 @@ func (s *AuthService) logoutHandler(c *gin.Context) {
 }
 
 func (s *AuthService) meHandler(c *gin.Context) {
-	principal, _ := PrincipalFromContext(c)
-	permissions := make([]string, 0, len(principal.Permissions))
-	for code := range principal.Permissions {
-		permissions = append(permissions, code)
+	principal, ok := PrincipalFromContext(c)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
 	}
-	sort.Strings(permissions)
-	c.JSON(http.StatusOK, gin.H{"user_id": principal.UserID, "tenant_id": principal.TenantID, "permissions": permissions})
+
+	profile, err := s.Profile(c.Request.Context(), principal)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load profile"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"user_id":      profile.UserID,
+		"email":        profile.Email,
+		"display_name": profile.DisplayName,
+		"tenant_id":    profile.TenantID,
+		"tenant_slug":  profile.TenantSlug,
+		"tenant_name":  profile.TenantName,
+		"permissions":  profile.Permissions,
+	})
 }
