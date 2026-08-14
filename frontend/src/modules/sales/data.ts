@@ -30,6 +30,8 @@ export interface SalesOrderLine {
 export interface SalesOrder {
   id: string;
   number: string;
+  /** Present when the order is linked to a CRM record; absent for a walk-in. */
+  customer_id?: string;
   customer_name: string;
   status: OrderStatus;
   order_date: string;
@@ -113,6 +115,34 @@ export function useCreateSalesOrder() {
   return useMutation({
     mutationFn: (input: CreateSalesOrderInput) =>
       api.post<{ data: SalesOrder }>("/sales/orders", {
+        customer_id: input.customer_id,
+        customer_name: input.customer_name,
+        order_date: input.order_date,
+        notes: input.notes,
+        lines: input.lines.map((line) => ({
+          sku: line.sku,
+          description: line.description,
+          quantity: line.quantity,
+          unit_price: line.unitPrice,
+        })),
+      }),
+    onSuccess: () => invalidateSales(queryClient),
+  });
+}
+
+/**
+ * The order as it should read after the edit. It replaces rather than patches -
+ * the lines sent become the order's lines - which is what the PUT endpoint
+ * expects. The number is absent because it is the order's identity, not a
+ * field, and the server will not change it.
+ */
+export type UpdateSalesOrderInput = CreateSalesOrderInput & { id: string };
+
+export function useUpdateSalesOrder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateSalesOrderInput) =>
+      api.put<{ data: SalesOrder }>(`/sales/orders/${input.id}`, {
         customer_id: input.customer_id,
         customer_name: input.customer_name,
         order_date: input.order_date,

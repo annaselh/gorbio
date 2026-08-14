@@ -20,5 +20,6 @@ func registerRoutes(app *core.App, auth *base.AuthService, h *handlers) {
 	app.Router.GET("/api/procurement/orders", auth.RequireAuth(), read, h.listPurchaseOrders)
 	app.Router.GET("/api/procurement/orders/:id", auth.RequireAuth(), read, h.getPurchaseOrder)
 	app.Router.POST("/api/procurement/orders", auth.RequireAuth(), manage, h.createPurchaseOrder)
+	app.Router.PUT("/api/procurement/orders/:id", auth.RequireAuth(), manage, h.updatePurchaseOrder)
 	app.Router.PUT("/api/procurement/orders/:id/status", auth.RequireAuth(), manage, h.updatePurchaseStatus)
 }

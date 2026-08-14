@@ -34,8 +34,32 @@ type createOrderRequest struct {
 	Lines        []lineRequest `json:"lines" binding:"required,min=1"`
 }
 
+// updateOrderRequest carries the order as it should read after the edit. The
+// number is absent on purpose: it is the order's identity, not a field.
+type updateOrderRequest struct {
+	CustomerID   string        `json:"customer_id"`
+	CustomerName string        `json:"customer_name"`
+	OrderDate    *time.Time    `json:"order_date"`
+	Currency     string        `json:"currency"`
+	Notes        string        `json:"notes"`
+	Lines        []lineRequest `json:"lines" binding:"required,min=1"`
+}
+
 type updateStatusRequest struct {
 	Status OrderStatus `json:"status" binding:"required"`
+}
+
+// lineInputs converts the wire lines to service inputs. The service is what
+// validates them; this only changes their shape.
+func lineInputs(requests []lineRequest) []LineInput {
+	lines := make([]LineInput, 0, len(requests))
+	for _, line := range requests {
+		lines = append(lines, LineInput{
+			SKU: line.SKU, Description: line.Description,
+			Quantity: line.Quantity, UnitPrice: line.UnitPrice,
+		})
+	}
+	return lines
 }
 
 func (h *handlers) list(c *gin.Context) {
@@ -96,17 +120,10 @@ func (h *handlers) create(c *gin.Context) {
 		return
 	}
 
-	lines := make([]LineInput, 0, len(request.Lines))
-	for _, line := range request.Lines {
-		lines = append(lines, LineInput{
-			SKU: line.SKU, Description: line.Description,
-			Quantity: line.Quantity, UnitPrice: line.UnitPrice,
-		})
-	}
-
 	input := CreateOrderInput{
 		Number: request.Number, CustomerName: request.CustomerName,
-		Currency: request.Currency, Notes: request.Notes, Lines: lines,
+		Currency: request.Currency, Notes: request.Notes,
+		Lines: lineInputs(request.Lines),
 	}
 	if request.CustomerID != "" {
 		customerID, err := uuid.Parse(request.CustomerID)
@@ -126,6 +143,51 @@ func (h *handlers) create(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"data": order})
+}
+
+func (h *handlers) update(c *gin.Context) {
+	principal, ok := base.PrincipalFromContext(c)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sales order id"})
+		return
+	}
+
+	var request updateOrderRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sales order payload"})
+		return
+	}
+
+	input := UpdateOrderInput{
+		CustomerName: request.CustomerName, Currency: request.Currency,
+		Notes: request.Notes, Lines: lineInputs(request.Lines),
+	}
+	// An absent customer_id clears the link and makes the order a walk-in
+	// again, which is the same shape create uses.
+	if request.CustomerID != "" {
+		customerID, err := uuid.Parse(request.CustomerID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid customer id"})
+			return
+		}
+		input.CustomerID = &customerID
+	}
+	if request.OrderDate != nil {
+		input.OrderDate = *request.OrderDate
+	}
+
+	order, err := h.service.Update(c.Request.Context(), principal.TenantID, id, input)
+	if err != nil {
+		respondServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": order})
 }
 
 func (h *handlers) updateStatus(c *gin.Context) {

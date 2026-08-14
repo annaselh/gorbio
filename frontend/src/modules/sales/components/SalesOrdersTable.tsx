@@ -12,7 +12,7 @@ import {
   useUpdateSalesOrderStatus,
   type SalesOrder,
 } from "../data";
-import { NewSalesOrderDialog } from "./NewSalesOrderDialog";
+import { SalesOrderFormDialog } from "./SalesOrderFormDialog";
 import { SalesOrderDialog } from "./SalesOrderDialog";
 
 const PAGE_SIZE = 5;
@@ -29,6 +29,7 @@ export function SalesOrdersTable({
 }) {
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
   const { hasPermission } = useAuth();
   const canManage = hasPermission("sales.manage");
@@ -134,6 +135,7 @@ export function SalesOrdersTable({
                           <StatusActions
                             order={order}
                             pending={updateStatus.isPending}
+                            onEdit={() => setEditing(order.id)}
                             onChange={(status) =>
                               updateStatus.mutate({ id: order.id, status })
                             }
@@ -159,7 +161,13 @@ export function SalesOrdersTable({
         </>
       )}
 
-      {creating && <NewSalesOrderDialog onClose={() => setCreating(false)} />}
+      {creating && <SalesOrderFormDialog onClose={() => setCreating(false)} />}
+      {editing && (
+        <SalesOrderFormDialog
+          orderID={editing}
+          onClose={() => setEditing(null)}
+        />
+      )}
       {viewing && (
         <SalesOrderDialog orderID={viewing} onClose={() => setViewing(null)} />
       )}
@@ -168,7 +176,7 @@ export function SalesOrdersTable({
 }
 
 /**
- * Offers only the transitions the service accepts: a draft may be confirmed or
+ * Offers only what the service accepts: a draft may be edited, confirmed or
  * cancelled, a confirmed order may still be cancelled, and a cancelled order is
  * terminal. Rendering a button the server would reject just teaches users to
  * ignore errors.
@@ -176,10 +184,12 @@ export function SalesOrdersTable({
 function StatusActions({
   order,
   pending,
+  onEdit,
   onChange,
 }: {
   order: SalesOrder;
   pending: boolean;
+  onEdit: () => void;
   onChange: (status: SalesOrder["status"]) => void;
 }) {
   if (order.status === "Cancelled") {
@@ -189,14 +199,26 @@ function StatusActions({
   return (
     <span className="flex gap-1.5">
       {order.status === "Draft" && (
-        <Button
-          variant="outline"
-          className="px-2.5 py-1 text-xs"
-          disabled={pending}
-          onClick={() => onChange("Confirmed")}
-        >
-          Confirm
-        </Button>
+        <>
+          {/* Editing stops at Draft because the service does: a confirmed
+              order is a commitment, not a working document. */}
+          <Button
+            variant="ghost"
+            className="px-2.5 py-1 text-xs"
+            disabled={pending}
+            onClick={onEdit}
+          >
+            Edit
+          </Button>
+          <Button
+            variant="outline"
+            className="px-2.5 py-1 text-xs"
+            disabled={pending}
+            onClick={() => onChange("Confirmed")}
+          >
+            Confirm
+          </Button>
+        </>
       )}
       <Button
         variant="ghost"

@@ -133,6 +133,9 @@ function invalidateProcurement(
 ) {
   queryClient.invalidateQueries({ queryKey: ["procurement"] });
   queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  // Receiving an order raises stock on the server, so a stock list already on
+  // screen is stale the moment a receipt succeeds.
+  queryClient.invalidateQueries({ queryKey: ["inventory"] });
 }
 
 export interface VendorInput {
@@ -186,6 +189,34 @@ export function useCreatePurchaseOrder() {
   return useMutation({
     mutationFn: (input: CreatePurchaseOrderInput) =>
       api.post<{ data: PurchaseOrder }>("/procurement/orders", {
+        vendor_id: input.vendor_id,
+        order_date: input.order_date,
+        expected_date: input.expected_date,
+        notes: input.notes,
+        lines: input.lines.map((line) => ({
+          sku: line.sku,
+          description: line.description,
+          quantity: line.quantity,
+          unit_price: line.unitPrice,
+        })),
+      }),
+    onSuccess: () => invalidateProcurement(queryClient),
+  });
+}
+
+/**
+ * The order as it should read after the edit. It replaces rather than patches -
+ * the lines sent become the order's lines - which is what the PUT endpoint
+ * expects. The number is absent because it is the order's identity, not a
+ * field, and the server will not change it.
+ */
+export type UpdatePurchaseOrderInput = CreatePurchaseOrderInput & { id: string };
+
+export function useUpdatePurchaseOrder() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdatePurchaseOrderInput) =>
+      api.put<{ data: PurchaseOrder }>(`/procurement/orders/${input.id}`, {
         vendor_id: input.vendor_id,
         order_date: input.order_date,
         expected_date: input.expected_date,

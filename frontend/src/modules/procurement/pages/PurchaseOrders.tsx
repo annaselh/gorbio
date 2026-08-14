@@ -13,7 +13,7 @@ import {
   useUpdatePurchaseStatus,
   type PurchaseOrder,
 } from "../data";
-import { NewPurchaseOrderDialog } from "../components/NewPurchaseOrderDialog";
+import { PurchaseOrderFormDialog } from "../components/PurchaseOrderFormDialog";
 import { PurchaseOrderDialog } from "../components/PurchaseOrderDialog";
 
 const PAGE_SIZE = 10;
@@ -21,6 +21,7 @@ const PAGE_SIZE = 10;
 export default function PurchaseOrders() {
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
   const [viewing, setViewing] = useState<string | null>(null);
   const { hasPermission } = useAuth();
   const canManage = hasPermission("procurement.manage");
@@ -128,6 +129,7 @@ export default function PurchaseOrders() {
                             <StatusActions
                               order={order}
                               pending={updateStatus.isPending}
+                              onEdit={() => setEditing(order.id)}
                               onChange={(status) =>
                                 updateStatus.mutate({ id: order.id, status })
                               }
@@ -155,7 +157,13 @@ export default function PurchaseOrders() {
       </Card>
 
       {creating && (
-        <NewPurchaseOrderDialog onClose={() => setCreating(false)} />
+        <PurchaseOrderFormDialog onClose={() => setCreating(false)} />
+      )}
+      {editing && (
+        <PurchaseOrderFormDialog
+          orderID={editing}
+          onClose={() => setEditing(null)}
+        />
       )}
       {viewing && (
         <PurchaseOrderDialog orderID={viewing} onClose={() => setViewing(null)} />
@@ -173,10 +181,12 @@ export default function PurchaseOrders() {
 function StatusActions({
   order,
   pending,
+  onEdit,
   onChange,
 }: {
   order: PurchaseOrder;
   pending: boolean;
+  onEdit: () => void;
   onChange: (status: PurchaseOrder["status"]) => void;
 }) {
   if (order.status === "Received" || order.status === "Cancelled") {
@@ -186,14 +196,26 @@ function StatusActions({
   return (
     <span className="flex gap-1.5">
       {order.status === "Draft" && (
-        <Button
-          variant="outline"
-          className="px-2.5 py-1 text-xs"
-          disabled={pending}
-          onClick={() => onChange("Confirmed")}
-        >
-          Confirm
-        </Button>
+        <>
+          {/* Editing stops at Draft because the service does: a confirmed
+              order is a commitment to the supplier, not a working document. */}
+          <Button
+            variant="ghost"
+            className="px-2.5 py-1 text-xs"
+            disabled={pending}
+            onClick={onEdit}
+          >
+            Edit
+          </Button>
+          <Button
+            variant="outline"
+            className="px-2.5 py-1 text-xs"
+            disabled={pending}
+            onClick={() => onChange("Confirmed")}
+          >
+            Confirm
+          </Button>
+        </>
       )}
       {order.status === "Confirmed" && (
         <Button

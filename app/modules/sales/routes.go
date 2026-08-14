@@ -17,6 +17,9 @@ func registerRoutes(app *core.App, auth *base.AuthService, h *handlers) {
 	app.Router.POST("/api/sales/orders",
 		auth.RequireAuth(), base.RequirePermission(PermissionManage), h.create)
 
+	app.Router.PUT("/api/sales/orders/:id",
+		auth.RequireAuth(), base.RequirePermission(PermissionManage), h.update)
+
 	app.Router.PUT("/api/sales/orders/:id/status",
 		auth.RequireAuth(), base.RequirePermission(PermissionManage), h.updateStatus)
 }

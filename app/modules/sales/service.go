@@ -153,56 +153,19 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, input CreateOr
 		return nil, errMissingTenant
 	}
 
-	customer := strings.TrimSpace(input.CustomerName)
-	// A linked customer wins over any name the client sent: the CRM record is
-	// the authority, and letting the two diverge would put a name on the order
-	// that no longer matches the account it points at.
-	if input.CustomerID != nil {
-		if s.resolveCustomer == nil {
-			return nil, fmt.Errorf("%w: customer records are not available", ErrInvalidInput)
-		}
-		resolved, err := s.resolveCustomer(ctx, tenantID, *input.CustomerID)
-		if err != nil {
-			return nil, err
-		}
-		customer = resolved
-	}
-	if customer == "" {
-		return nil, fmt.Errorf("%w: customer name is required", ErrInvalidInput)
-	}
-	if len(input.Lines) == 0 {
-		return nil, fmt.Errorf("%w: at least one line is required", ErrInvalidInput)
+	customer, err := s.customerName(ctx, tenantID, input.CustomerID, input.CustomerName)
+	if err != nil {
+		return nil, err
 	}
 
 	orderID := uuid.New()
-	lines := make([]OrderLine, 0, len(input.Lines))
-	for index, line := range input.Lines {
-		sku := strings.ToUpper(strings.TrimSpace(line.SKU))
-		description := strings.TrimSpace(line.Description)
-		if sku == "" || description == "" {
-			return nil, fmt.Errorf("%w: line %d needs a SKU and description", ErrInvalidInput, index+1)
-		}
-		if line.Quantity <= 0 {
-			return nil, fmt.Errorf("%w: line %d quantity must be positive", ErrInvalidInput, index+1)
-		}
-		if line.UnitPrice < 0 {
-			return nil, fmt.Errorf("%w: line %d unit price must not be negative", ErrInvalidInput, index+1)
-		}
-		lines = append(lines, OrderLine{
-			ID: uuid.New(), OrderID: orderID, TenantID: tenantID,
-			SKU: sku, Description: description,
-			Quantity: line.Quantity, UnitPrice: line.UnitPrice,
-		})
+	lines, err := buildLines(tenantID, orderID, input.Lines)
+	if err != nil {
+		return nil, err
 	}
 
-	orderDate := input.OrderDate
-	if orderDate.IsZero() {
-		orderDate = time.Now().UTC()
-	}
-	currency := strings.ToUpper(strings.TrimSpace(input.Currency))
-	if currency == "" {
-		currency = "IDR"
-	}
+	orderDate := orderDateOrNow(input.OrderDate)
+	currency := currencyOrDefault(input.Currency)
 
 	order := Order{
 		ID: orderID, TenantID: tenantID,
@@ -212,7 +175,7 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, input CreateOr
 	}
 	order.Recalculate()
 
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		number := strings.ToUpper(strings.TrimSpace(input.Number))
 		if number == "" {
 			generated, err := nextOrderNumber(tx, tenantID)
@@ -235,6 +198,161 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, input CreateOr
 		return nil, err
 	}
 	return &order, nil
+}
+
+// UpdateOrderInput is the order as it should read after the edit. It is a
+// replacement rather than a patch: the lines it carries become the order's
+// lines, so removing a line is expressed by sending the order without it.
+type UpdateOrderInput struct {
+	CustomerID   *uuid.UUID
+	CustomerName string
+	OrderDate    time.Time
+	Currency     string
+	Notes        string
+	Lines        []LineInput
+}
+
+// Update rewrites a draft order's content. The number is not editable: it is
+// the order's identity, it may already have been quoted to the customer, and
+// the sequence it came from cannot re-issue it.
+//
+// The status is not editable here either - moving an order through its
+// lifecycle stays in UpdateStatus, so the rules about what a confirmation means
+// live in exactly one place.
+func (s *Service) Update(ctx context.Context, tenantID, id uuid.UUID, input UpdateOrderInput) (*Order, error) {
+	if tenantID == uuid.Nil {
+		return nil, errMissingTenant
+	}
+
+	customer, err := s.customerName(ctx, tenantID, input.CustomerID, input.CustomerName)
+	if err != nil {
+		return nil, err
+	}
+	lines, err := buildLines(tenantID, id, input.Lines)
+	if err != nil {
+		return nil, err
+	}
+
+	var order Order
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("tenant_id = ? AND id = ?", tenantID, id).First(&order).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("load sales order: %w", err)
+		}
+
+		// Read under the same lock the write takes, so an order confirmed
+		// between the check and the write cannot be edited after the fact.
+		if !order.Editable() {
+			return fmt.Errorf("%w: this order is %s", ErrNotEditable, order.Status)
+		}
+
+		// Replace the lines wholesale. Diffing them against what the client
+		// sent would need a stable line identity the client does not have.
+		if err := tx.Where("tenant_id = ? AND order_id = ?", tenantID, id).
+			Delete(&OrderLine{}).Error; err != nil {
+			return fmt.Errorf("clear sales order lines: %w", err)
+		}
+		if err := tx.Create(&lines).Error; err != nil {
+			return fmt.Errorf("replace sales order lines: %w", err)
+		}
+
+		order.CustomerID = input.CustomerID
+		order.CustomerName = customer
+		order.OrderDate = orderDateOrNow(input.OrderDate)
+		order.Currency = currencyOrDefault(input.Currency)
+		order.Notes = strings.TrimSpace(input.Notes)
+		order.Lines = lines
+		// Recalculate keeps any discount the extension applied, clamped to the
+		// new subtotal - editing the lines down must not leave a discount
+		// larger than the order it discounts.
+		order.Recalculate()
+
+		if err := tx.Model(&order).Updates(map[string]any{
+			"customer_id":    order.CustomerID,
+			"customer_name":  order.CustomerName,
+			"order_date":     order.OrderDate,
+			"currency":       order.Currency,
+			"notes":          order.Notes,
+			"subtotal":       order.Subtotal,
+			"discount_total": order.DiscountTotal,
+			"total":          order.Total,
+		}).Error; err != nil {
+			return fmt.Errorf("update sales order: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &order, nil
+}
+
+// customerName decides which name the order carries. A linked customer wins
+// over any name the client sent: the CRM record is the authority, and letting
+// the two diverge would put a name on the order that no longer matches the
+// account it points at.
+func (s *Service) customerName(ctx context.Context, tenantID uuid.UUID, customerID *uuid.UUID, fallback string) (string, error) {
+	name := strings.TrimSpace(fallback)
+	if customerID != nil {
+		if s.resolveCustomer == nil {
+			return "", fmt.Errorf("%w: customer records are not available", ErrInvalidInput)
+		}
+		resolved, err := s.resolveCustomer(ctx, tenantID, *customerID)
+		if err != nil {
+			return "", err
+		}
+		name = resolved
+	}
+	if name == "" {
+		return "", fmt.Errorf("%w: customer name is required", ErrInvalidInput)
+	}
+	return name, nil
+}
+
+// buildLines validates the lines and materialises them for the given order, so
+// creating an order and editing one cannot drift on what a valid line is.
+func buildLines(tenantID, orderID uuid.UUID, inputs []LineInput) ([]OrderLine, error) {
+	if len(inputs) == 0 {
+		return nil, fmt.Errorf("%w: at least one line is required", ErrInvalidInput)
+	}
+
+	lines := make([]OrderLine, 0, len(inputs))
+	for index, line := range inputs {
+		sku := strings.ToUpper(strings.TrimSpace(line.SKU))
+		description := strings.TrimSpace(line.Description)
+		if sku == "" || description == "" {
+			return nil, fmt.Errorf("%w: line %d needs a SKU and description", ErrInvalidInput, index+1)
+		}
+		if line.Quantity <= 0 {
+			return nil, fmt.Errorf("%w: line %d quantity must be positive", ErrInvalidInput, index+1)
+		}
+		if line.UnitPrice < 0 {
+			return nil, fmt.Errorf("%w: line %d unit price must not be negative", ErrInvalidInput, index+1)
+		}
+		lines = append(lines, OrderLine{
+			ID: uuid.New(), OrderID: orderID, TenantID: tenantID,
+			SKU: sku, Description: description,
+			Quantity: line.Quantity, UnitPrice: line.UnitPrice,
+		})
+	}
+	return lines, nil
+}
+
+func orderDateOrNow(date time.Time) time.Time {
+	if date.IsZero() {
+		return time.Now().UTC()
+	}
+	return date
+}
+
+func currencyOrDefault(currency string) string {
+	if code := strings.ToUpper(strings.TrimSpace(currency)); code != "" {
+		return code
+	}
+	return "IDR"
 }
 
 // UpdateStatus moves an order through its lifecycle. Draft may be confirmed or

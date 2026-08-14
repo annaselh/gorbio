@@ -313,55 +313,25 @@ func (s *Service) CreatePurchaseOrder(ctx context.Context, tenantID uuid.UUID, i
 	if input.VendorID == uuid.Nil {
 		return nil, fmt.Errorf("%w: a vendor is required", ErrInvalidInput)
 	}
-	if len(input.Lines) == 0 {
-		return nil, fmt.Errorf("%w: at least one line is required", ErrInvalidInput)
-	}
 
 	orderID := uuid.New()
-	lines := make([]PurchaseOrderLine, 0, len(input.Lines))
-	for index, line := range input.Lines {
-		sku := strings.ToUpper(strings.TrimSpace(line.SKU))
-		description := strings.TrimSpace(line.Description)
-		if sku == "" || description == "" {
-			return nil, fmt.Errorf("%w: line %d needs a SKU and description", ErrInvalidInput, index+1)
-		}
-		if line.Quantity <= 0 {
-			return nil, fmt.Errorf("%w: line %d quantity must be positive", ErrInvalidInput, index+1)
-		}
-		if line.UnitPrice < 0 {
-			return nil, fmt.Errorf("%w: line %d unit price must not be negative", ErrInvalidInput, index+1)
-		}
-		lines = append(lines, PurchaseOrderLine{
-			ID: uuid.New(), PurchaseOrderID: orderID, TenantID: tenantID,
-			SKU: sku, Description: description,
-			Quantity: line.Quantity, UnitPrice: line.UnitPrice,
-		})
-	}
-
-	orderDate := input.OrderDate
-	if orderDate.IsZero() {
-		orderDate = time.Now().UTC()
-	}
-	currency := strings.ToUpper(strings.TrimSpace(input.Currency))
-	if currency == "" {
-		currency = "IDR"
+	lines, err := buildPurchaseLines(tenantID, orderID, input.Lines)
+	if err != nil {
+		return nil, err
 	}
 
 	order := PurchaseOrder{
 		ID: orderID, TenantID: tenantID, VendorID: input.VendorID,
-		Status: PurchaseStatusDraft, OrderDate: orderDate, ExpectedDate: input.ExpectedDate,
-		Currency: currency, Notes: strings.TrimSpace(input.Notes), Lines: lines,
+		Status: PurchaseStatusDraft, OrderDate: orderDateOrNow(input.OrderDate),
+		ExpectedDate: input.ExpectedDate, Currency: currencyOrDefault(input.Currency),
+		Notes: strings.TrimSpace(input.Notes), Lines: lines,
 	}
 	order.Recalculate()
 
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var vendor Vendor
-		if err := tx.Where("tenant_id = ? AND id = ?", tenantID, input.VendorID).
-			First(&vendor).Error; err != nil {
-			return ErrVendorNotFound
-		}
-		if vendor.Status != VendorStatusActive {
-			return ErrVendorInactive
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		vendor, err := activeVendor(tx, tenantID, input.VendorID)
+		if err != nil {
+			return err
 		}
 		order.VendorName = vendor.Name
 
@@ -387,6 +357,157 @@ func (s *Service) CreatePurchaseOrder(ctx context.Context, tenantID uuid.UUID, i
 		return nil, err
 	}
 	return &order, nil
+}
+
+// UpdatePurchaseInput is the order as it should read after the edit, with the
+// same replacement semantics as its sales counterpart: the lines it carries
+// become the order's lines.
+type UpdatePurchaseInput struct {
+	VendorID     uuid.UUID
+	OrderDate    time.Time
+	ExpectedDate *time.Time
+	Currency     string
+	Notes        string
+	Lines        []LineInput
+}
+
+// UpdatePurchaseOrder rewrites a draft order's content. The number stays fixed
+// - it is the order's identity and may already have been sent to the vendor -
+// and the status stays with UpdatePurchaseStatus.
+//
+// The vendor may be changed, but only to an active one, on the same reasoning
+// that stops a draft being raised against an inactive vendor in the first
+// place. Changing it re-denormalises VendorName from the vendor record.
+func (s *Service) UpdatePurchaseOrder(ctx context.Context, tenantID, id uuid.UUID, input UpdatePurchaseInput) (*PurchaseOrder, error) {
+	if tenantID == uuid.Nil {
+		return nil, errMissingTenant
+	}
+	if input.VendorID == uuid.Nil {
+		return nil, fmt.Errorf("%w: a vendor is required", ErrInvalidInput)
+	}
+
+	lines, err := buildPurchaseLines(tenantID, id, input.Lines)
+	if err != nil {
+		return nil, err
+	}
+
+	var order PurchaseOrder
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("tenant_id = ? AND id = ?", tenantID, id).First(&order).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrPurchaseNotFound
+			}
+			return fmt.Errorf("load purchase order: %w", err)
+		}
+
+		// Checked under the lock the write takes, so an order confirmed
+		// between the check and the write cannot be edited after the fact.
+		if !order.Editable() {
+			return fmt.Errorf("%w: this order is %s", ErrNotEditable, order.Status)
+		}
+
+		vendor, err := activeVendor(tx, tenantID, input.VendorID)
+		if err != nil {
+			return err
+		}
+
+		// Replaced wholesale rather than diffed: the client has no stable line
+		// identity to diff against.
+		if err := tx.Where("tenant_id = ? AND purchase_order_id = ?", tenantID, id).
+			Delete(&PurchaseOrderLine{}).Error; err != nil {
+			return fmt.Errorf("clear purchase order lines: %w", err)
+		}
+		if err := tx.Create(&lines).Error; err != nil {
+			return fmt.Errorf("replace purchase order lines: %w", err)
+		}
+
+		order.VendorID = vendor.ID
+		order.VendorName = vendor.Name
+		order.OrderDate = orderDateOrNow(input.OrderDate)
+		order.ExpectedDate = input.ExpectedDate
+		order.Currency = currencyOrDefault(input.Currency)
+		order.Notes = strings.TrimSpace(input.Notes)
+		order.Lines = lines
+		order.Recalculate()
+
+		if err := tx.Model(&order).Updates(map[string]any{
+			"vendor_id":      order.VendorID,
+			"vendor_name":    order.VendorName,
+			"order_date":     order.OrderDate,
+			"expected_date":  order.ExpectedDate,
+			"currency":       order.Currency,
+			"notes":          order.Notes,
+			"subtotal":       order.Subtotal,
+			"discount_total": order.DiscountTotal,
+			"total":          order.Total,
+		}).Error; err != nil {
+			return fmt.Errorf("update purchase order: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &order, nil
+}
+
+// activeVendor loads a vendor and refuses an inactive one. Ordering from a
+// vendor the tenant has switched off is the thing being prevented, whether the
+// order is being raised or edited.
+func activeVendor(tx *gorm.DB, tenantID, vendorID uuid.UUID) (*Vendor, error) {
+	var vendor Vendor
+	if err := tx.Where("tenant_id = ? AND id = ?", tenantID, vendorID).First(&vendor).Error; err != nil {
+		return nil, ErrVendorNotFound
+	}
+	if vendor.Status != VendorStatusActive {
+		return nil, ErrVendorInactive
+	}
+	return &vendor, nil
+}
+
+// buildPurchaseLines validates the lines and materialises them for the given
+// order, so raising an order and editing one cannot drift on what a valid line
+// is.
+func buildPurchaseLines(tenantID, orderID uuid.UUID, inputs []LineInput) ([]PurchaseOrderLine, error) {
+	if len(inputs) == 0 {
+		return nil, fmt.Errorf("%w: at least one line is required", ErrInvalidInput)
+	}
+
+	lines := make([]PurchaseOrderLine, 0, len(inputs))
+	for index, line := range inputs {
+		sku := strings.ToUpper(strings.TrimSpace(line.SKU))
+		description := strings.TrimSpace(line.Description)
+		if sku == "" || description == "" {
+			return nil, fmt.Errorf("%w: line %d needs a SKU and description", ErrInvalidInput, index+1)
+		}
+		if line.Quantity <= 0 {
+			return nil, fmt.Errorf("%w: line %d quantity must be positive", ErrInvalidInput, index+1)
+		}
+		if line.UnitPrice < 0 {
+			return nil, fmt.Errorf("%w: line %d unit price must not be negative", ErrInvalidInput, index+1)
+		}
+		lines = append(lines, PurchaseOrderLine{
+			ID: uuid.New(), PurchaseOrderID: orderID, TenantID: tenantID,
+			SKU: sku, Description: description,
+			Quantity: line.Quantity, UnitPrice: line.UnitPrice,
+		})
+	}
+	return lines, nil
+}
+
+func orderDateOrNow(date time.Time) time.Time {
+	if date.IsZero() {
+		return time.Now().UTC()
+	}
+	return date
+}
+
+func currencyOrDefault(currency string) string {
+	if code := strings.ToUpper(strings.TrimSpace(currency)); code != "" {
+		return code
+	}
+	return "IDR"
 }
 
 // UpdatePurchaseStatus moves an order through its lifecycle:

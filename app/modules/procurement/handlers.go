@@ -50,8 +50,32 @@ type createPurchaseRequest struct {
 	Lines        []lineRequest `json:"lines" binding:"required,min=1"`
 }
 
+// updatePurchaseRequest carries the order as it should read after the edit.
+// The number is absent on purpose: it is the order's identity, not a field.
+type updatePurchaseRequest struct {
+	VendorID     string        `json:"vendor_id" binding:"required"`
+	OrderDate    *time.Time    `json:"order_date"`
+	ExpectedDate *time.Time    `json:"expected_date"`
+	Currency     string        `json:"currency"`
+	Notes        string        `json:"notes"`
+	Lines        []lineRequest `json:"lines" binding:"required,min=1"`
+}
+
 type purchaseStatusRequest struct {
 	Status PurchaseStatus `json:"status" binding:"required"`
+}
+
+// lineInputs converts the wire lines to service inputs. The service is what
+// validates them; this only changes their shape.
+func lineInputs(requests []lineRequest) []LineInput {
+	lines := make([]LineInput, 0, len(requests))
+	for _, line := range requests {
+		lines = append(lines, LineInput{
+			SKU: line.SKU, Description: line.Description,
+			Quantity: line.Quantity, UnitPrice: line.UnitPrice,
+		})
+	}
+	return lines
 }
 
 func principalOf(c *gin.Context) (base.Principal, bool) {
@@ -250,17 +274,10 @@ func (h *handlers) createPurchaseOrder(c *gin.Context) {
 		return
 	}
 
-	lines := make([]LineInput, 0, len(request.Lines))
-	for _, line := range request.Lines {
-		lines = append(lines, LineInput{
-			SKU: line.SKU, Description: line.Description,
-			Quantity: line.Quantity, UnitPrice: line.UnitPrice,
-		})
-	}
-
 	input := CreatePurchaseInput{
 		Number: request.Number, VendorID: vendorID, ExpectedDate: request.ExpectedDate,
-		Currency: request.Currency, Notes: request.Notes, Lines: lines,
+		Currency: request.Currency, Notes: request.Notes,
+		Lines: lineInputs(request.Lines),
 	}
 	if request.OrderDate != nil {
 		input.OrderDate = *request.OrderDate
@@ -276,6 +293,49 @@ func (h *handlers) createPurchaseOrder(c *gin.Context) {
 		"number": order.Number, "vendor": order.VendorName, "total": order.Total,
 	})
 	c.JSON(http.StatusCreated, gin.H{"data": order})
+}
+
+func (h *handlers) updatePurchaseOrder(c *gin.Context) {
+	principal, ok := principalOf(c)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid purchase order id"})
+		return
+	}
+
+	var request updatePurchaseRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid purchase order payload"})
+		return
+	}
+	vendorID, err := uuid.Parse(request.VendorID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid vendor id"})
+		return
+	}
+
+	input := UpdatePurchaseInput{
+		VendorID: vendorID, ExpectedDate: request.ExpectedDate,
+		Currency: request.Currency, Notes: request.Notes,
+		Lines: lineInputs(request.Lines),
+	}
+	if request.OrderDate != nil {
+		input.OrderDate = *request.OrderDate
+	}
+
+	order, err := h.service.UpdatePurchaseOrder(c.Request.Context(), principal.TenantID, id, input)
+	if err != nil {
+		respondServiceError(c, err)
+		return
+	}
+
+	h.record(c, principal, "procurement.order_updated", "purchase_order", order.ID.String(), map[string]any{
+		"number": order.Number, "vendor": order.VendorName, "total": order.Total,
+	})
+	c.JSON(http.StatusOK, gin.H{"data": order})
 }
 
 func (h *handlers) updatePurchaseStatus(c *gin.Context) {

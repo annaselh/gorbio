@@ -115,6 +115,7 @@ permission; see `modules/sales/routes.go` for the pattern.
 | GET | `/api/sales/orders` | `sales.read` | Paged list with `limit`, `offset`, `status`, `customer` |
 | GET | `/api/sales/orders/:id` | `sales.read` | One order with its lines |
 | POST | `/api/sales/orders` | `sales.manage` | Create a draft order |
+| PUT | `/api/sales/orders/:id` | `sales.manage` | Replace a draft's content, lines included |
 | PUT | `/api/sales/orders/:id/status` | `sales.manage` | Confirm or cancel |
 | POST | `/api/sales/orders/:id/discount` | `sales.manage` | Applied by the sales-discount extension |
 | GET | `/api/inventory/items` | `inventory.read` | Stock list; `low_stock=true` filters to alerts |
@@ -129,6 +130,7 @@ permission; see `modules/sales/routes.go` for the pattern.
 | GET | `/api/procurement/orders` | `procurement.read` | Purchase orders; `status`, `vendor_id` |
 | GET | `/api/procurement/orders/:id` | `procurement.read` | One purchase order with lines |
 | POST | `/api/procurement/orders` | `procurement.manage` | Raise a draft purchase order |
+| PUT | `/api/procurement/orders/:id` | `procurement.manage` | Replace a draft's content, lines included |
 | PUT | `/api/procurement/orders/:id/status` | `procurement.manage` | Confirm, receive or cancel |
 | GET | `/api/crm/customers` | `crm.read` | Customer list; `search`, `status` |
 | GET | `/api/crm/customers/:id` | `crm.read` | One customer |
@@ -157,6 +159,17 @@ name from the CRM record and ignores any name the client sent, so the two cannot
 diverge. The dependency points one way on purpose: **CRM depends on sales and
 hands it a customer lookup at registration; sales knows nothing about CRM** and
 still works with the module uninstalled.
+
+Editing an order replaces its content rather than patching it: the client sends
+the order as it should now read, and the lines it sends become the lines. There
+is no stable line identity for a client to diff against, so a patch protocol
+would have to invent one. Only **drafts** are editable, checked under the same
+row lock the write takes so an order confirmed between the check and the write
+cannot be edited after the fact. The number is never editable - it is the
+order's identity, it may already have been quoted to the customer or sent to the
+supplier, and the sequence it came from cannot re-issue it. The status is not
+editable through this route either, so the rules about what a confirmation means
+stay in one place.
 
 Marking a purchase order **Received** raises inventory quantities for every line
 on it, inside the same transaction that flips the status - an order claiming the
