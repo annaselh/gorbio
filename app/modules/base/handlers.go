@@ -2,6 +2,7 @@ package base
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -46,6 +47,97 @@ func (s *AuthService) logoutHandler(c *gin.Context) {
 	}
 	s.clearSessionCookie(c)
 	c.Status(http.StatusNoContent)
+}
+
+type forgotPasswordRequest struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
+type resetPasswordRequest struct {
+	Token    string `json:"token" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+type verifyEmailRequest struct {
+	Token string `json:"token" binding:"required"`
+}
+
+// forgotPasswordHandler always answers 202, whether or not the address exists.
+// Distinguishing the two would turn this endpoint into an account oracle.
+func (s *AuthService) forgotPasswordHandler(c *gin.Context) {
+	var request forgotPasswordRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "a valid email address is required"})
+		return
+	}
+
+	err := s.RequestPasswordReset(c.Request.Context(), request.Email, c.ClientIP())
+	if errors.Is(err, ErrTooManyAttempts) {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "too many reset requests, try again later"})
+		return
+	}
+	if err != nil {
+		// Mail transport failures are logged upstream; still answer neutrally
+		// so a delivery outage does not leak which addresses are registered.
+		slog.Error("password reset request failed", "error", err)
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": "If that address has an account, a reset link is on its way.",
+	})
+}
+
+func (s *AuthService) resetPasswordHandler(c *gin.Context) {
+	var request resetPasswordRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token and password are required"})
+		return
+	}
+
+	switch err := s.ResetPassword(c.Request.Context(), request.Token, request.Password); {
+	case err == nil:
+		c.Status(http.StatusNoContent)
+	case errors.Is(err, ErrInvalidToken):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "this reset link is invalid or has expired"})
+	case errors.Is(err, ErrWeakPassword):
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
+	default:
+		slog.Error("password reset failed", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not reset password"})
+	}
+}
+
+func (s *AuthService) verifyEmailHandler(c *gin.Context) {
+	var request verifyEmailRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "token is required"})
+		return
+	}
+
+	switch err := s.VerifyEmail(c.Request.Context(), request.Token); {
+	case err == nil:
+		c.Status(http.StatusNoContent)
+	case errors.Is(err, ErrInvalidToken):
+		c.JSON(http.StatusBadRequest, gin.H{"error": "this verification link is invalid or has expired"})
+	default:
+		slog.Error("email verification failed", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not verify email"})
+	}
+}
+
+func (s *AuthService) resendVerificationHandler(c *gin.Context) {
+	principal, ok := PrincipalFromContext(c)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authentication required"})
+		return
+	}
+
+	if err := s.RequestEmailVerification(c.Request.Context(), principal); err != nil {
+		slog.Error("email verification request failed", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not send verification email"})
+		return
+	}
+	c.Status(http.StatusAccepted)
 }
 
 func (s *AuthService) meHandler(c *gin.Context) {

@@ -16,6 +16,10 @@ type Settings struct {
 	Env          string
 	CookieSecure bool
 	SessionTTL   time.Duration
+	// BaseURL is the public origin of the web client. It prefixes the links
+	// embedded in transactional email, so it must be the address a recipient
+	// can actually open - not the API's own bind address.
+	BaseURL string
 }
 
 // DefaultSettings fails closed: a caller that forgets to wire configuration

@@ -11,6 +11,7 @@ type App struct {
 	Hooks      *HookManager
 	Events     *EventBus
 	Settings   Settings
+	Mailer     Mailer
 }
 
 func NewApp(
@@ -28,6 +29,7 @@ func NewApp(
 		Hooks:      NewHookManager(),
 		Events:     NewEventBus(),
 		Settings:   DefaultSettings(),
+		Mailer:     LogMailer{},
 	}
 }
 
@@ -35,5 +37,14 @@ func NewApp(
 // before Register, so modules observe the final values.
 func (app *App) WithSettings(settings Settings) *App {
 	app.Settings = settings
+	return app
+}
+
+// WithMailer installs the outbound mail transport. The default is LogMailer,
+// which delivers nothing; wiring must replace it for any real deployment.
+func (app *App) WithMailer(mailer Mailer) *App {
+	if mailer != nil {
+		app.Mailer = mailer
+	}
 	return app
 }

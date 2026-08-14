@@ -41,8 +41,12 @@ src/
 │   ├── DynamicForm.tsx server-driven form for runtime custom fields
 │   ├── apiClient.ts   fetch wrapper: cookie credentials, ApiError
 │   ├── auth.tsx       session context: login, logout, permission checks
-│   ├── AuthGate.tsx   login screen until the session probe succeeds
+│   ├── AuthGate.tsx   unauthenticated screens vs. the shell; token links
+│   ├── AuthLayout.tsx shared card + field styling for the auth screens
 │   ├── LoginPage.tsx  email / password / optional company form
+│   ├── ForgotPasswordPage.tsx  requests a reset link
+│   ├── ResetPasswordPage.tsx   consumes ?token= from the reset email
+│   ├── VerifyEmailPage.tsx     consumes ?token= from the verification email
 │   └── AppRouter.tsx  router assembled from registry.routes
 │
 ├── modules/           BUSINESS — may use core, never each other
@@ -107,6 +111,7 @@ has two or more series, and a screen-reader `<SrTable>` data view.
 - **Module data is still fixture-backed except inventory**, which reads
   `/api/inventory/items` through React Query. Sales and the dashboard widgets
   remain static until their backend endpoints return real rows.
-- Three `oxlint` fast-refresh warnings come from manifest files exporting a
-  const beside lazy component refs. Inherent to the manifest pattern; affects
-  HMR granularity only.
+- Five `oxlint` fast-refresh warnings: three from manifest files exporting a
+  const beside lazy component refs, two from `auth.tsx` and `AuthLayout.tsx`
+  exporting a hook and a shared class string beside their components. Both are
+  inherent to the pattern and affect HMR granularity only.

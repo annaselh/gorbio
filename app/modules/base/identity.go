@@ -90,19 +90,28 @@ type AuthService struct {
 	db           *gorm.DB
 	sessionTTL   time.Duration
 	cookieSecure bool
+	baseURL      string
+	mailer       core.Mailer
 	loginLimiter *core.RateLimiter
+	resetLimiter *core.RateLimiter
 }
 
-func NewAuthService(db *gorm.DB, settings core.Settings) *AuthService {
+func NewAuthService(db *gorm.DB, settings core.Settings, mailer core.Mailer) *AuthService {
 	ttl := settings.SessionTTL
 	if ttl <= 0 {
 		ttl = core.DefaultSettings().SessionTTL
+	}
+	if mailer == nil {
+		mailer = core.LogMailer{}
 	}
 	return &AuthService{
 		db:           db,
 		sessionTTL:   ttl,
 		cookieSecure: settings.CookieSecure,
+		baseURL:      settings.BaseURL,
+		mailer:       mailer,
 		loginLimiter: core.NewRateLimiter(loginRateLimit, loginRateWindow),
+		resetLimiter: core.NewRateLimiter(resetRequestLimit, resetRequestWindow),
 	}
 }
 
@@ -339,6 +348,12 @@ func (s *AuthService) recordFailedLogin(ctx context.Context, user *User, now tim
 
 func (s *AuthService) recordAudit(ctx context.Context, actorID, tenantID *uuid.UUID, action, resourceType, resourceID, ipAddress, userAgent string) {
 	_ = s.db.WithContext(ctx).Create(&AuditLog{ID: uuid.New(), ActorUserID: actorID, TenantID: tenantID, Action: action, ResourceType: resourceType, ResourceID: resourceID, Metadata: []byte("{}"), IPAddress: ipAddress, UserAgent: userAgent}).Error
+}
+
+// recordAuditTx writes the audit row inside an existing transaction so the
+// record commits or rolls back together with the change it describes.
+func (s *AuthService) recordAuditTx(ctx context.Context, tx *gorm.DB, actorID, tenantID *uuid.UUID, action, resourceType, resourceID string) {
+	_ = tx.WithContext(ctx).Create(&AuditLog{ID: uuid.New(), ActorUserID: actorID, TenantID: tenantID, Action: action, ResourceType: resourceType, ResourceID: resourceID, Metadata: []byte("{}")}).Error
 }
 
 func newSessionToken() (string, string, error) {

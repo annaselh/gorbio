@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +16,7 @@ import (
 	"github.com/annaselh/gorbio/extensions"
 	"github.com/annaselh/gorbio/internal/config"
 	"github.com/annaselh/gorbio/internal/database"
+	"github.com/annaselh/gorbio/internal/mailer"
 	"github.com/annaselh/gorbio/modules"
 )
 
@@ -22,6 +24,27 @@ func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// buildMailer returns the SMTP transport when one is configured. Config
+// validation already rejects a production start without SMTP_HOST, so the
+// logging fallback can only be reached in development, where it prints reset
+// links to the console instead of dropping them.
+func buildMailer(cfg *config.Config) core.Mailer {
+	if !cfg.SMTP.Configured() {
+		slog.Warn("no SMTP transport configured; transactional email will be logged, not delivered")
+		return core.LogMailer{}
+	}
+
+	return mailer.New(mailer.Config{
+		Host:        cfg.SMTP.Host,
+		Port:        cfg.SMTP.Port,
+		Username:    cfg.SMTP.Username,
+		Password:    cfg.SMTP.Password,
+		From:        cfg.SMTP.From,
+		FromName:    cfg.SMTP.FromName,
+		ImplicitTLS: cfg.SMTP.ImplicitTLS,
+	})
 }
 
 func run() error {
@@ -63,7 +86,8 @@ func run() error {
 		// make login silently fail on a local http://localhost dev server.
 		CookieSecure: cfg.IsProduction(),
 		SessionTTL:   cfg.SessionTTL,
-	})
+		BaseURL:      cfg.AppBaseURL,
+	}).WithMailer(buildMailer(cfg))
 
 	if err := modules.RegisterAll(moduleRegistry); err != nil {
 		return fmt.Errorf("add modules: %w", err)

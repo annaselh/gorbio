@@ -10,10 +10,14 @@ func validConfig() *Config {
 	return &Config{
 		Env:        EnvProduction,
 		HTTPAddr:   ":8080",
+		AppBaseURL: "https://erp.example.com",
 		SessionTTL: time.Hour,
 		DB: DBConfig{
 			Driver: "postgres", Host: "localhost", Port: "5432",
 			Database: "gorbio", Username: "gorbio", SSLMode: "disable",
+		},
+		SMTP: SMTPConfig{
+			Host: "smtp.example.com", Port: "587", From: "no-reply@example.com",
 		},
 	}
 }
@@ -93,6 +97,72 @@ func TestIsProductionFailsClosed(t *testing.T) {
 	}
 	if !(&Config{Env: ""}).IsProduction() {
 		t.Fatal("an unset environment must default to production hardening")
+	}
+}
+
+// Password reset has no fallback delivery path, so a production start without
+// a transport must fail loudly rather than drop mail on the floor.
+func TestValidateRequiresSMTPInProduction(t *testing.T) {
+	config := validConfig()
+	config.SMTP = SMTPConfig{}
+
+	err := config.Validate()
+	if err == nil {
+		t.Fatal("production without SMTP_HOST must be rejected")
+	}
+	if !strings.Contains(err.Error(), "SMTP_HOST") {
+		t.Fatalf("error should name the missing setting, got %v", err)
+	}
+}
+
+func TestValidateAllowsMissingSMTPInDevelopment(t *testing.T) {
+	config := validConfig()
+	config.Env = EnvDevelopment
+	config.SMTP = SMTPConfig{}
+
+	if err := config.Validate(); err != nil {
+		t.Fatalf("development should fall back to the logging mailer, got %v", err)
+	}
+}
+
+func TestValidateRequiresSenderWhenSMTPConfigured(t *testing.T) {
+	config := validConfig()
+	config.SMTP.From = ""
+
+	if err := config.Validate(); err == nil {
+		t.Fatal("a configured transport without SMTP_FROM must be rejected")
+	}
+}
+
+func TestValidateRejectsNonAddressSender(t *testing.T) {
+	config := validConfig()
+	config.SMTP.From = "Orbio Notifications"
+
+	if err := config.Validate(); err == nil {
+		t.Fatal("SMTP_FROM must look like an email address")
+	}
+}
+
+// APP_BASE_URL is embedded in reset links; without a scheme the recipient gets
+// a link their mail client cannot open.
+func TestValidateRejectsSchemelessAppBaseURL(t *testing.T) {
+	config := validConfig()
+	config.AppBaseURL = "erp.example.com"
+
+	if err := config.Validate(); err == nil {
+		t.Fatal("APP_BASE_URL without a scheme must be rejected")
+	}
+}
+
+func TestSMTPConfigured(t *testing.T) {
+	if (SMTPConfig{}).Configured() {
+		t.Fatal("an empty host means no transport")
+	}
+	if (SMTPConfig{Host: "   "}).Configured() {
+		t.Fatal("a blank host means no transport")
+	}
+	if !(SMTPConfig{Host: "smtp.example.com"}).Configured() {
+		t.Fatal("a host means the transport is configured")
 	}
 }
 

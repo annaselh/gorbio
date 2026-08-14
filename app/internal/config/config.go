@@ -18,10 +18,28 @@ const (
 type Config struct {
 	Env         string
 	HTTPAddr    string
+	AppBaseURL  string
 	CORSOrigins []string
 	SessionTTL  time.Duration
 	DB          DBConfig
+	SMTP        SMTPConfig
 	AutoMigrate bool
+}
+
+// SMTPConfig describes the outbound mail transport. Host being empty means no
+// transport is configured, which is allowed only in development.
+type SMTPConfig struct {
+	Host        string
+	Port        string
+	Username    string
+	Password    string
+	From        string
+	FromName    string
+	ImplicitTLS bool
+}
+
+func (s SMTPConfig) Configured() bool {
+	return strings.TrimSpace(s.Host) != ""
 }
 
 type DBConfig struct {
@@ -61,11 +79,26 @@ func Load() (*Config, error) {
 		sessionTTL = parsed
 	}
 
+	implicitTLS, err := strconv.ParseBool(envOrDefault("SMTP_IMPLICIT_TLS", "false"))
+	if err != nil {
+		return nil, fmt.Errorf("parse SMTP_IMPLICIT_TLS: %w", err)
+	}
+
 	config := &Config{
 		Env:         envOrDefault("APP_ENV", EnvProduction),
 		HTTPAddr:    envOrDefault("HTTP_ADDR", ":8080"),
+		AppBaseURL:  strings.TrimRight(envOrDefault("APP_BASE_URL", "http://localhost:5173"), "/"),
 		CORSOrigins: splitAndTrim(os.Getenv("CORS_ORIGINS")),
 		SessionTTL:  sessionTTL,
+		SMTP: SMTPConfig{
+			Host:        strings.TrimSpace(os.Getenv("SMTP_HOST")),
+			Port:        envOrDefault("SMTP_PORT", "587"),
+			Username:    os.Getenv("SMTP_USERNAME"),
+			Password:    os.Getenv("SMTP_PASSWORD"),
+			From:        strings.TrimSpace(os.Getenv("SMTP_FROM")),
+			FromName:    envOrDefault("SMTP_FROM_NAME", "Orbio"),
+			ImplicitTLS: implicitTLS,
+		},
 		DB: DBConfig{
 			Driver:   os.Getenv("DB_DRIVER"),
 			Host:     os.Getenv("DB_HOST"),
@@ -96,6 +129,27 @@ func (c *Config) Validate() error {
 
 	if c.SessionTTL <= 0 {
 		return fmt.Errorf("SESSION_TTL must be positive")
+	}
+
+	if !strings.HasPrefix(c.AppBaseURL, "http://") && !strings.HasPrefix(c.AppBaseURL, "https://") {
+		return fmt.Errorf("APP_BASE_URL %q must include a scheme; it is the origin of password reset links", c.AppBaseURL)
+	}
+
+	// Password reset and email verification are useless without a transport, so
+	// production must configure one rather than silently drop the mail.
+	if c.IsProduction() && !c.SMTP.Configured() {
+		return fmt.Errorf("SMTP_HOST must be set in production; email delivery has no fallback")
+	}
+	if c.SMTP.Configured() {
+		if strings.TrimSpace(c.SMTP.From) == "" {
+			return fmt.Errorf("SMTP_FROM must be set when SMTP_HOST is configured")
+		}
+		if !strings.Contains(c.SMTP.From, "@") {
+			return fmt.Errorf("SMTP_FROM %q must be an email address", c.SMTP.From)
+		}
+		if strings.TrimSpace(c.SMTP.Port) == "" {
+			return fmt.Errorf("SMTP_PORT must be set when SMTP_HOST is configured")
+		}
 	}
 
 	// A cross-origin browser session needs an explicit allowlist: credentialed

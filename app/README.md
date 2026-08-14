@@ -84,7 +84,34 @@ The current implementation includes the following foundational pieces:
 - migration execution hooks,
 - route registration hooks,
 - event subscriber registration,
-- HTTP server startup via the app runtime.
+- HTTP server startup via the app runtime,
+- cookie session authentication with Argon2id password hashing,
+- role and permission checks (RBAC) applied per route,
+- password reset and email verification over SMTP,
+- credentialed CORS with an explicit origin allowlist.
+
+## HTTP endpoints
+
+Registered by the `base` module. Routes marked *auth* require a valid session
+cookie; the rest are reachable without one by design, since their caller is
+someone who cannot sign in.
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| POST | `/api/auth/login` | – | Sign in; sets the session cookie |
+| POST | `/api/auth/logout` | auth | Revoke the current session |
+| GET | `/api/auth/me` | auth | Profile, tenant and permission codes |
+| POST | `/api/auth/password/forgot` | – | Mail a reset link; always answers 202 |
+| POST | `/api/auth/password/reset` | – | Consume a reset token, set a new password |
+| POST | `/api/auth/email/verify` | – | Consume a verification token |
+| POST | `/api/auth/email/resend` | auth | Re-send the verification email |
+
+Business modules register their own routes behind `RequireAuth` and an explicit
+permission; see `modules/inventory/routes.go` for the pattern.
+
+Recovery tokens are stored as SHA-256 hashes, are single-use, expire (1 hour for
+reset, 24 hours for verification), and requesting a new one supersedes any
+outstanding token. A completed reset revokes every existing session.
 
 ## Getting started
 
