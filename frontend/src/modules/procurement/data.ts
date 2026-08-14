@@ -76,7 +76,18 @@ export const procurementKeys = {
     ["procurement", "vendors", params] as const,
   orders: (params: { limit: number; offset: number; status?: PurchaseStatus }) =>
     ["procurement", "orders", params] as const,
+  order: (id: string) => ["procurement", "order", id] as const,
 };
+
+/** Fetches one order with its lines; the list endpoint omits them. */
+export function usePurchaseOrder(id: string) {
+  return useQuery({
+    queryKey: procurementKeys.order(id),
+    queryFn: () => api.get<{ data: PurchaseOrder }>(`/procurement/orders/${id}`),
+    select: (response) => response.data,
+    enabled: Boolean(id),
+  });
+}
 
 export function useVendors(params: {
   limit: number;

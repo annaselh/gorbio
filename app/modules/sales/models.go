@@ -34,11 +34,20 @@ type Order struct {
 	ID       uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	TenantID uuid.UUID `gorm:"type:uuid;not null;index;uniqueIndex:idx_sales_order_tenant_number" json:"tenant_id"`
 
-	Number       string      `gorm:"size:32;not null;uniqueIndex:idx_sales_order_tenant_number" json:"number"`
-	CustomerName string      `gorm:"size:200;not null" json:"customer_name"`
-	Status       OrderStatus `gorm:"size:16;not null;default:Draft;index" json:"status"`
-	OrderDate    time.Time   `gorm:"not null;index" json:"order_date"`
-	Currency     string      `gorm:"size:3;not null;default:IDR" json:"currency"`
+	Number string `gorm:"size:32;not null;uniqueIndex:idx_sales_order_tenant_number" json:"number"`
+
+	// CustomerID links to the CRM record when one exists. It is nullable so an
+	// order can still be raised for a walk-in, and so orders created before the
+	// CRM module was installed remain valid.
+	CustomerID *uuid.UUID `gorm:"type:uuid;index" json:"customer_id,omitempty"`
+	// CustomerName is denormalised so a historical order still reads correctly
+	// after the customer is renamed - the same reason the purchase order keeps
+	// VendorName. The link stays in CustomerID.
+	CustomerName string `gorm:"size:200;not null" json:"customer_name"`
+
+	Status    OrderStatus `gorm:"size:16;not null;default:Draft;index" json:"status"`
+	OrderDate time.Time   `gorm:"not null;index" json:"order_date"`
+	Currency  string      `gorm:"size:3;not null;default:IDR" json:"currency"`
 
 	// Subtotal is the sum of the lines; DiscountTotal is applied by the
 	// sales-discount extension; Total is what the customer owes.

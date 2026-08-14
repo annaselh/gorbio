@@ -8,7 +8,7 @@ import { PlaceholderPage } from "@/shared/ui/PlaceholderPage";
  * `modules/<name>/index.tsx` as it gets built.
  */
 const PLANNED = [
-  { name: "crm", label: "Customers (CRM)", icon: "customers", path: "/crm/customers", sequence: 110, tint: "#F97316" },
+  // "crm" graduated to the real module; see modules/crm.
   // "purchase" graduated to the real procurement module; see modules/procurement.
   { name: "accounting", label: "Accounting", icon: "accounting", path: "/accounting", sequence: 150, tint: "#F59E0B" },
   { name: "hr", label: "HR", icon: "hr", path: "/hr", sequence: 160, tint: "#8B5CF6" },

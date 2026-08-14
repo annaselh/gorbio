@@ -130,6 +130,11 @@ permission; see `modules/sales/routes.go` for the pattern.
 | GET | `/api/procurement/orders/:id` | `procurement.read` | One purchase order with lines |
 | POST | `/api/procurement/orders` | `procurement.manage` | Raise a draft purchase order |
 | PUT | `/api/procurement/orders/:id/status` | `procurement.manage` | Confirm, receive or cancel |
+| GET | `/api/crm/customers` | `crm.read` | Customer list; `search`, `status` |
+| GET | `/api/crm/customers/:id` | `crm.read` | One customer |
+| POST | `/api/crm/customers` | `crm.manage` | Create a customer |
+| PUT | `/api/crm/customers/:id` | `crm.manage` | Update customer details |
+| PUT | `/api/crm/customers/:id/status` | `crm.manage` | Activate or deactivate |
 | GET | `/api/members` | `membership.read` | People with access to the tenant |
 | GET | `/api/roles` | `membership.read` | Assignable roles |
 | POST | `/api/members` | `membership.manage` | Invite; mails a set-password link |
@@ -146,8 +151,15 @@ until they complete the emailed reset, so a credential is never transmitted.
 Suspending a membership revokes that member's sessions immediately, and the
 service refuses to remove or demote a tenant's last active owner.
 
-The dashboard module depends on base, sales, inventory and procurement rather
-than the reverse - putting these queries in base would invert the dependency
+A sales order may carry a `customer_id` linking to a CRM record, or just a
+`customer_name` for a walk-in. When the link is present the server resolves the
+name from the CRM record and ignores any name the client sent, so the two cannot
+diverge. The dependency points one way on purpose: **CRM depends on sales and
+hands it a customer lookup at registration; sales knows nothing about CRM** and
+still works with the module uninstalled.
+
+The dashboard module depends on base, sales, inventory, procurement and CRM
+rather than the reverse - putting these queries in base would invert the dependency
 every other module relies on. Only *Confirmed* sales count as revenue and only
 *Confirmed* or *Received* purchases count as spend: a draft is a proposal and a
 cancelled order never happened. Gross margin is revenue minus purchase spend,

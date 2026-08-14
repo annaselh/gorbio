@@ -14,12 +14,14 @@ import {
   type PurchaseOrder,
 } from "../data";
 import { NewPurchaseOrderDialog } from "../components/NewPurchaseOrderDialog";
+import { PurchaseOrderDialog } from "../components/PurchaseOrderDialog";
 
 const PAGE_SIZE = 10;
 
 export default function PurchaseOrders() {
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [viewing, setViewing] = useState<string | null>(null);
   const { hasPermission } = useAuth();
   const canManage = hasPermission("procurement.manage");
   const updateStatus = useUpdatePurchaseStatus();
@@ -97,10 +99,14 @@ export default function PurchaseOrders() {
                           scope="row"
                           className="px-2.5 py-3 text-left text-xs font-medium whitespace-nowrap text-ink"
                         >
-                          <span className="inline-flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            onClick={() => setViewing(order.id)}
+                            className="inline-flex cursor-pointer items-center gap-2.5 rounded hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                          >
                             <Dot tone={tone} />
                             {order.number}
-                          </span>
+                          </button>
                         </th>
                         <td className="max-w-[180px] truncate px-2.5 py-3 text-xs text-ink-secondary">
                           {order.vendor_name}
@@ -150,6 +156,9 @@ export default function PurchaseOrders() {
 
       {creating && (
         <NewPurchaseOrderDialog onClose={() => setCreating(false)} />
+      )}
+      {viewing && (
+        <PurchaseOrderDialog orderID={viewing} onClose={() => setViewing(null)} />
       )}
     </>
   );

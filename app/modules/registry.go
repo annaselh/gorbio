@@ -5,6 +5,7 @@ package modules
 import (
 	"github.com/annaselh/gorbio/core"
 	"github.com/annaselh/gorbio/modules/base"
+	"github.com/annaselh/gorbio/modules/crm"
 	"github.com/annaselh/gorbio/modules/dashboard"
 	"github.com/annaselh/gorbio/modules/inventory"
 	"github.com/annaselh/gorbio/modules/procurement"
@@ -26,6 +27,10 @@ func RegisterAll(registry *core.Registry) error {
 	}
 
 	if err := registry.Register(procurement.NewModule()); err != nil {
+		return err
+	}
+
+	if err := registry.Register(crm.NewModule()); err != nil {
 		return err
 	}
 

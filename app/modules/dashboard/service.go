@@ -129,11 +129,14 @@ func (s *Service) salesTotals(ctx context.Context, tenantID uuid.UUID, period Pe
 		Orders    int64
 		Customers int64
 	}
+	// Count the CRM link where an order has one and fall back to the free-text
+	// name otherwise, so a walk-in still counts once and a customer renamed in
+	// CRM is not double-counted across their old and new name.
 	err = s.db.WithContext(ctx).
 		Table("sales_orders").
 		Select(`COALESCE(SUM(total), 0) AS revenue,
 			COUNT(*) AS orders,
-			COUNT(DISTINCT customer_name) AS customers`).
+			COUNT(DISTINCT COALESCE(customer_id::text, customer_name)) AS customers`).
 		Where(`tenant_id = ? AND status = 'Confirmed' AND deleted_at IS NULL
 			AND order_date >= ? AND order_date < ?`, tenantID, period.Start, period.End).
 		Scan(&row).Error

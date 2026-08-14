@@ -100,7 +100,9 @@ function invalidateSales(queryClient: ReturnType<typeof useQueryClient>) {
 }
 
 export interface CreateSalesOrderInput {
-  customer_name: string;
+  /** Either a CRM link or a free-text name; the server requires one of them. */
+  customer_id?: string;
+  customer_name?: string;
   order_date?: string;
   notes?: string;
   lines: DraftLine[];
@@ -111,6 +113,7 @@ export function useCreateSalesOrder() {
   return useMutation({
     mutationFn: (input: CreateSalesOrderInput) =>
       api.post<{ data: SalesOrder }>("/sales/orders", {
+        customer_id: input.customer_id,
         customer_name: input.customer_name,
         order_date: input.order_date,
         notes: input.notes,

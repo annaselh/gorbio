@@ -13,6 +13,7 @@ import {
   type SalesOrder,
 } from "../data";
 import { NewSalesOrderDialog } from "./NewSalesOrderDialog";
+import { SalesOrderDialog } from "./SalesOrderDialog";
 
 const PAGE_SIZE = 5;
 
@@ -28,6 +29,7 @@ export function SalesOrdersTable({
 }) {
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
+  const [viewing, setViewing] = useState<string | null>(null);
   const { hasPermission } = useAuth();
   const canManage = hasPermission("sales.manage");
   const updateStatus = useUpdateSalesOrderStatus();
@@ -104,10 +106,14 @@ export function SalesOrdersTable({
                         scope="row"
                         className="px-2.5 py-3 text-left text-xs font-medium whitespace-nowrap text-ink"
                       >
-                        <span className="inline-flex items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => setViewing(order.id)}
+                          className="inline-flex cursor-pointer items-center gap-2.5 rounded hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+                        >
                           <Dot tone={tone} />
                           {order.number}
-                        </span>
+                        </button>
                       </th>
                       {/* Customer is the flexible column — it truncates so the
                           figures and the status badge never get clipped. */}
@@ -154,6 +160,9 @@ export function SalesOrdersTable({
       )}
 
       {creating && <NewSalesOrderDialog onClose={() => setCreating(false)} />}
+      {viewing && (
+        <SalesOrderDialog orderID={viewing} onClose={() => setViewing(null)} />
+      )}
     </Card>
   );
 }

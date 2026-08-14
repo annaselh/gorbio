@@ -23,8 +23,11 @@ type lineRequest struct {
 }
 
 type createOrderRequest struct {
-	Number       string        `json:"number"`
-	CustomerName string        `json:"customer_name" binding:"required"`
+	Number string `json:"number"`
+	// Either customer_id (linked to CRM) or customer_name (walk-in) must be
+	// present; the service rejects the request when both are empty.
+	CustomerID   string        `json:"customer_id"`
+	CustomerName string        `json:"customer_name"`
 	OrderDate    *time.Time    `json:"order_date"`
 	Currency     string        `json:"currency"`
 	Notes        string        `json:"notes"`
@@ -104,6 +107,14 @@ func (h *handlers) create(c *gin.Context) {
 	input := CreateOrderInput{
 		Number: request.Number, CustomerName: request.CustomerName,
 		Currency: request.Currency, Notes: request.Notes, Lines: lines,
+	}
+	if request.CustomerID != "" {
+		customerID, err := uuid.Parse(request.CustomerID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid customer id"})
+			return
+		}
+		input.CustomerID = &customerID
 	}
 	if request.OrderDate != nil {
 		input.OrderDate = *request.OrderDate

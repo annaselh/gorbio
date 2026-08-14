@@ -29,7 +29,7 @@ func (m *Module) Name() string {
 // Depends lists every module the aggregation reads from, so the registry boots
 // them first and fails loudly if one is not installed.
 func (m *Module) Depends() []string {
-	return []string{"base", "sales", "inventory", "procurement"}
+	return []string{"base", "sales", "inventory", "procurement", "crm"}
 }
 
 func (m *Module) Register(app *core.App) error {

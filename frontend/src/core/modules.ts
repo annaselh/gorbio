@@ -1,4 +1,5 @@
 import { baseModule } from "@/modules/base";
+import { crmModule } from "@/modules/crm";
 import { inventoryModule } from "@/modules/inventory";
 import { procurementModule } from "@/modules/procurement";
 import { salesModule } from "@/modules/sales";
@@ -12,6 +13,7 @@ import { buildRegistry } from "./registry";
  */
 export const registry = buildRegistry([
   baseModule,
+  crmModule,
   inventoryModule,
   procurementModule,
   salesModule,

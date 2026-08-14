@@ -24,10 +24,20 @@ var (
 
 type Service struct {
 	db *gorm.DB
+	// resolveCustomer is nil when no CRM module is installed; Create then falls
+	// back to the free-text customer name.
+	resolveCustomer CustomerResolver
 }
 
 func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
+}
+
+// WithCustomerResolver attaches a CRM lookup. Called during wiring, before any
+// request is served.
+func (s *Service) WithCustomerResolver(resolver CustomerResolver) *Service {
+	s.resolveCustomer = resolver
+	return s
 }
 
 type LineInput struct {
@@ -39,13 +49,22 @@ type LineInput struct {
 
 type CreateOrderInput struct {
 	// Number is optional; a sequential SO-XXXXXX is generated when blank.
-	Number       string
+	Number string
+	// CustomerID is optional. When set, the name is resolved from the CRM
+	// record so the two cannot disagree; when absent, CustomerName is taken
+	// verbatim, which keeps walk-in sales possible without a CRM entry.
+	CustomerID   *uuid.UUID
 	CustomerName string
 	OrderDate    time.Time
 	Currency     string
 	Notes        string
 	Lines        []LineInput
 }
+
+// CustomerResolver lets the sales module accept a CRM customer id without
+// importing the CRM module. Whoever wires the app supplies the lookup, so the
+// two modules stay independent and sales still works with CRM uninstalled.
+type CustomerResolver func(ctx context.Context, tenantID, customerID uuid.UUID) (name string, err error)
 
 type ListFilter struct {
 	Status   OrderStatus
@@ -135,6 +154,19 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, input CreateOr
 	}
 
 	customer := strings.TrimSpace(input.CustomerName)
+	// A linked customer wins over any name the client sent: the CRM record is
+	// the authority, and letting the two diverge would put a name on the order
+	// that no longer matches the account it points at.
+	if input.CustomerID != nil {
+		if s.resolveCustomer == nil {
+			return nil, fmt.Errorf("%w: customer records are not available", ErrInvalidInput)
+		}
+		resolved, err := s.resolveCustomer(ctx, tenantID, *input.CustomerID)
+		if err != nil {
+			return nil, err
+		}
+		customer = resolved
+	}
 	if customer == "" {
 		return nil, fmt.Errorf("%w: customer name is required", ErrInvalidInput)
 	}
@@ -173,7 +205,8 @@ func (s *Service) Create(ctx context.Context, tenantID uuid.UUID, input CreateOr
 	}
 
 	order := Order{
-		ID: orderID, TenantID: tenantID, CustomerName: customer,
+		ID: orderID, TenantID: tenantID,
+		CustomerID: input.CustomerID, CustomerName: customer,
 		Status: OrderStatusDraft, OrderDate: orderDate, Currency: currency,
 		Notes: strings.TrimSpace(input.Notes), Lines: lines,
 	}
